@@ -1,0 +1,33 @@
+# === 系统 ===
+.DS_Store
+**/.DS_Store
+
+# === 依赖与构建 ===
+node_modules/
+dist/
+.wrangler/
+.vercel/
+
+# === 环境变量与密钥（绝不入库）===
+.env
+.env.*
+!.env.example
+.dev.vars
+!.dev.vars.example
+*.pem
+*.key
+*.p12
+*.cert
+
+# === 大体积二进制资产（属于 NAS / Cloudflare R2，不进 git）===
+king测试/
+studio-site/assets/king-cases/
+*.pdf
+*.docx
+
+# === 报告渲染中间产物 ===
+report-render/
+report-render-final/
+report-assets/
+lo-profile/
+build_progress_report.py
