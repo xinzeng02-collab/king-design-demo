@@ -1,0 +1,90 @@
+# ============================================================================
+# .dev.vars.example  ——  Cloudflare Workers 本地开发变量模板
+# 用法: cp .dev.vars.example .dev.vars  然后填入「测试环境」的值。
+# ⚠️ .dev.vars 已被 .gitignore 忽略，绝不提交。
+# ⚠️ 生产环境的敏感值不要写这里，要用: wrangler secret put <NAME>
+# ⚠️ 前端(Pages)永远不读取本文件中的任何变量。
+# ============================================================================
+
+# ---- 运行模式 ----
+PAYMENT_MODE=test                 # test=走 MockProvider(标记 TEST) | prod=真实渠道
+APP_ENV=development               # development | staging | production
+
+# ---- Supabase（服务端）----
+SUPABASE_URL=                     # 项目 URL, 例 https://xxxx.supabase.co
+SUPABASE_ANON_KEY=                # 匿名公钥(前端可用，权限受 RLS 限制)
+SUPABASE_SERVICE_ROLE_KEY=        # ⚠️敏感 服务角色密钥(仅服务端，绕过 RLS)
+SUPABASE_JWT_SECRET=              # ⚠️敏感 校验用户 JWT 用
+
+# ---- Cloudflare R2（交付文件）----
+R2_ACCOUNT_ID=
+R2_ACCESS_KEY_ID=                 # ⚠️敏感
+R2_SECRET_ACCESS_KEY=             # ⚠️敏感
+R2_BUCKET_PREVIEWS=king-previews  # 花型预览图桶
+R2_BUCKET_DELIVERY=king-delivery  # 正式交付文件桶
+R2_DOWNLOAD_URL_TTL=1800          # 短期下载链接有效期(秒, 15-30 分钟)
+
+# ---- MockProvider（仅测试模式）----
+MOCK_MCH_ID=MOCK_MCH_0001
+MOCK_APP_ID=MOCK_APP_0001
+MOCK_NOTIFY_SECRET=               # ⚠️敏感 测试用回调签名密钥(非真实密钥)
+
+# ============================================================================
+# 以下为「真实渠道」参数，测试阶段全部留空 -> 渠道显示「暂未开放」。
+# 上线时用 wrangler secret put 写入敏感项，非敏感项可用 wrangler.toml [vars]。
+# ============================================================================
+
+# ---- 微信支付（PC Native 扫码）----
+WECHAT_MCH_ID=
+WECHAT_APP_ID=
+WECHAT_MERCHANT_SERIAL_NO=
+WECHAT_MERCHANT_PRIVATE_KEY=      # ⚠️敏感
+WECHAT_API_V3_KEY=               # ⚠️敏感
+WECHATPAY_PUBLIC_KEY_ID=
+WECHATPAY_PUBLIC_KEY=            # ⚠️敏感
+WECHAT_NOTIFY_URL=
+
+# ---- 支付宝（电脑网站支付 / 扫码）----
+ALIPAY_APP_ID=
+ALIPAY_APP_PRIVATE_KEY=          # ⚠️敏感
+ALIPAY_PUBLIC_KEY=              # ⚠️敏感
+ALIPAY_APP_CERT=
+ALIPAY_CERT=
+ALIPAY_ROOT_CERT=
+ALIPAY_NOTIFY_URL=
+ALIPAY_RETURN_URL=
+
+# ---- 银联（在线网关 / 聚合收银台，待商户通道确认）----
+UNIONPAY_MERCHANT_ID=
+UNIONPAY_SIGN_CERT=
+UNIONPAY_SIGN_CERT_PASSWORD=     # ⚠️敏感
+UNIONPAY_VERIFY_CERT=
+UNIONPAY_FRONT_URL=
+UNIONPAY_BACK_URL=
+UNIONPAY_ENV=test
+
+# ---- Apple Pay（需 PSP 承载 + 域名验证；否则隐藏入口）----
+APPLE_MERCHANT_ID=
+APPLE_TEAM_ID=
+APPLE_MERCHANT_DOMAIN=
+APPLE_PAYMENT_PROCESSING_CERT=
+APPLE_PAYMENT_PROCESSING_PRIVATE_KEY=   # ⚠️敏感
+APPLE_MERCHANT_IDENTITY_CERT=
+APPLE_MERCHANT_IDENTITY_PRIVATE_KEY=    # ⚠️敏感
+APPLE_PSP_PROVIDER=                     # 承载 Apple Pay 的 PSP 标识
+APPLE_PSP_API_KEY=                      # ⚠️敏感 PSP 服务端 API Key
+
+# ---- 聚合支付服务商（方案 B，最终选定后填写；变量名随服务商调整）----
+PSP_PROVIDER=                    # 选定的聚合服务商标识
+PSP_MERCHANT_ID=
+PSP_API_KEY=                     # ⚠️敏感
+PSP_API_SECRET=                  # ⚠️敏感
+PSP_WEBHOOK_SECRET=              # ⚠️敏感
+PSP_NOTIFY_URL=
+
+# ---- 对公转账 / 人工收款（无渠道密钥）----
+BANK_ACCOUNT_NAME=
+BANK_ACCOUNT_NUMBER=
+BANK_NAME=
+MANUAL_WECHAT_QR_URL=
+MANUAL_ALIPAY_QR_URL=

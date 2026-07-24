@@ -1,0 +1,21 @@
+-- 回滚 0001_init.sql
+drop table if exists download_tokens cascade;
+drop table if exists delivery_files cascade;
+drop table if exists bank_transfer_records cascade;
+drop table if exists refunds cascade;
+drop table if exists payment_events cascade;
+drop table if exists payments cascade;
+drop table if exists order_items cascade;
+drop table if exists orders cascade;
+drop table if exists audit_logs cascade;
+drop table if exists memberships cascade;
+drop table if exists customers cascade;
+drop table if exists organizations cascade;
+drop function if exists set_updated_at cascade;
+drop function if exists current_role_in cascade;
+drop function if exists current_customer_id cascade;
+drop type if exists license_type_t;
+drop type if exists user_role_t;
+drop type if exists delivery_status_t;
+drop type if exists payment_status_t;
+drop type if exists order_status_t;

@@ -1,0 +1,70 @@
+# KiNG DESiGN 支付后端 · payment-backend
+
+统一 Payment Provider 适配层 + Cloudflare Workers + Supabase + R2。
+**当前处于测试模式，不接入任何真实商户密钥，不产生真实扣款。所有模拟支付均标记 TEST。**
+
+## 目录
+```
+payment-backend/
+├─ src/
+│  ├─ index.js                 Workers 入口(路由骨架 + 鉴权 + 渠道可用性)
+│  ├─ lib/
+│  │  ├─ money.js              金额=整数分，禁浮点
+│  │  ├─ statemachine.js       订单/支付/交付 三状态机(分离)
+│  │  └─ auth.js               Supabase JWT(HS256) 校验 + 角色权限
+│  └─ providers/
+│     ├─ PaymentProvider.js    统一接口基类
+│     ├─ config.js             各渠道配置结构 + 可用性判定
+│     ├─ registry.js           方式->Provider 解析(测试走 Mock)
+│     ├─ MockProvider.js       测试渠道(TEST，含验签/幂等模拟)
+│     ├─ WeChatPayProvider.js  微信(PC Native 扫码，待密钥)
+│     ├─ AlipayProvider.js     支付宝(电脑网站/扫码，待密钥)
+│     ├─ UnionPayProvider.js   银联(在线网关/聚合，待密钥)
+│     ├─ ApplePayProvider.js   Apple Pay(需 PSP+域名验证+设备支持)
+│     ├─ BankTransferProvider.js  对公转账(财务确认)
+│     └─ ManualCollectProvider.js 人工收款码(pending_manual_verification)
+├─ supabase/migrations/
+│  ├─ 0001_init.sql            全部表 + 枚举 + RLS + 审计
+│  └─ 0001_init_down.sql       回滚
+├─ scripts/migrate-localstorage.mjs  现有 localStorage 订单迁移
+├─ test/smoke.js               冒烟测试(17 项)
+├─ wrangler.toml               Workers 配置(敏感值用 Secrets)
+├─ .dev.vars.example / .env.example   变量模板(无真实值)
+└─ 支付参数配置清单.md          每个参数来源/敏感/测试或生产
+```
+
+## 本地如何启动
+```bash
+cd payment-backend
+node test/smoke.js          # 无需任何密钥，验证核心逻辑(应输出 全部通过 ✅)
+# 起本地 Workers(可选，需 npm i)：
+npm install
+cp .dev.vars.example .dev.vars   # 填测试值即可，真实密钥留空
+npm run dev                  # http://localhost:8787/api/health
+```
+验证接口：
+- `GET /api/health` → `{ ok:true, mode:"test" }`
+- `GET /api/payments/channels` → 各渠道"暂未开放/对公可用"，测试模式带 TEST
+
+## 收款模式
+- **A 自动支付**：仅当服务端收到并**验签通过的回调**或**主动查单确认**，才把 payment_status 改为 `paid`。
+- **B 人工收款**：客户扫我方收款码付款并上传凭证 → 订单进入 `pending_manual_verification` → **财务确认真实到账**后才 `paid`。
+- 前端返回的"成功"、URL 里的 success、客户上传的截图 —— **都不作为支付依据**。
+
+## 如何确认没有破坏现有功能
+本目录是**全新独立目录**，不修改 `studio-site/` 任何文件；现有静态原型照常运行。
+- 打开 `studio-site/index.html`，员工/客户登录、作品库、订单中心、交付等功能与之前完全一致。
+- 回滚方式：删除 `payment-backend/` 目录即可完全撤销本阶段全部改动（或 `git checkout main`）。
+
+## 安全红线
+- 敏感参数只进 **Cloudflare Secrets**（`wrangler secret put`），绝不进 GitHub/前端/localStorage。
+- 前端只调 `/api/*`，永远拿不到私钥/证书/服务端密钥。
+- 权威写入(支付状态/退款/财务确认/交付/下载令牌)一律由 Workers 用 service_role 执行并写 audit_logs。
+
+## 下一阶段（第二阶段：支付测试全链路）
+1. 业务处理器：createPayment / status / notify / close / refund / bankTransfer / confirm / download
+2. 回调幂等 + 主动查单 + 退款状态机（接 MockProvider 打通）
+3. 支付页面 + 12 种支付状态 + 倒计时 + 按设备切换体验
+4. 对公转账与财务确认流程
+5. 受控交付（R2 短期签名链接）
+6. 完整自动化测试（覆盖伪造/越权/重复通知/退款后下载等）

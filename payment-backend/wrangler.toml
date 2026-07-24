@@ -1,0 +1,37 @@
+# Cloudflare Workers 配置。敏感值绝不写这里 —— 用: wrangler secret put <NAME>
+name = "king-design-payment-api"
+main = "src/index.js"
+compatibility_date = "2024-09-01"
+
+# 非敏感变量可放这里；敏感变量用 Secrets。
+[vars]
+PAYMENT_MODE = "test"          # test=MockProvider(标记 TEST) | prod=真实渠道
+APP_ENV = "development"
+R2_BUCKET_PREVIEWS = "king-previews"
+R2_BUCKET_DELIVERY = "king-delivery"
+R2_DOWNLOAD_URL_TTL = "1800"
+
+# R2 绑定（创建桶后启用）
+# [[r2_buckets]]
+# binding = "DELIVERY"
+# bucket_name = "king-delivery"
+# [[r2_buckets]]
+# binding = "PREVIEWS"
+# bucket_name = "king-previews"
+
+# 环境隔离：开发 / 预发 / 生产
+[env.staging.vars]
+PAYMENT_MODE = "test"
+APP_ENV = "staging"
+
+[env.production.vars]
+PAYMENT_MODE = "prod"
+APP_ENV = "production"
+
+# 需要用 secret 写入的敏感变量（清单见 支付参数配置清单.md）：
+#   wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#   wrangler secret put SUPABASE_JWT_SECRET
+#   wrangler secret put R2_ACCESS_KEY_ID
+#   wrangler secret put R2_SECRET_ACCESS_KEY
+#   wrangler secret put MOCK_NOTIFY_SECRET
+#   ...（真实渠道 secret 上线时再写）

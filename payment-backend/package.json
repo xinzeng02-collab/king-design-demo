@@ -1,0 +1,16 @@
+{
+  "name": "king-design-payment-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KiNG DESiGN 支付模块后端 —— 统一 Payment Provider 适配层 + Cloudflare Workers + Supabase",
+  "scripts": {
+    "test": "node --test",
+    "smoke": "node test/smoke.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
