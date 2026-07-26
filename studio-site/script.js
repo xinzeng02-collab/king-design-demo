@@ -1364,7 +1364,22 @@ function loadStudioState() {
   }
 }
 
+/* 防抖保存：整库序列化（数百张卡）很重，合并 300ms 内的多次调用，避免每个操作都卡一下。
+   页面隐藏/关闭前会立即落盘，不会丢数据。 */
+let _saveTimer = null;
 function saveStudioState() {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => { _saveTimer = null; saveStudioStateNow(); }, 300);
+  return true;
+}
+function flushStudioState() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; saveStudioStateNow(); }
+}
+window.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushStudioState(); });
+window.addEventListener("pagehide", flushStudioState);
+window.addEventListener("beforeunload", flushStudioState);
+
+function saveStudioStateNow() {
   const overrides = {};
   const createdWorks = [];
   const removedFiles = studioState.removedFiles || [];
@@ -2215,6 +2230,7 @@ function switchView(target) {
     moShown = MO_PAGE_SIZE;
     renderMyOrders();
   }
+  if (typeof updateSidebarBadges === "function") updateSidebarBadges();
   if (target === "library") {
     const selectionFlow = document.querySelector("#customerSelectionFlow");
     const isViewerLibrary = selectionFlow?.classList.contains("viewer-mode");
@@ -3884,7 +3900,9 @@ function ensureOrderDetailOverlay() {
     .odx-ev-who{flex:none;font-size:11px;padding:2px 8px;border-radius:6px;background:#f5f4f2;border:1px solid #eae8e4;color:#57534e}
     .odx-ev-who.cust{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
     .odx-ev-t{font-size:13px;color:#1c1917;line-height:1.5}
-    .odx-ev-d{font-size:11px;color:#a8a29e;margin-top:2px}`;
+    .odx-ev-d{font-size:11px;color:#a8a29e;margin-top:2px}
+    .odx-badge{font-size:11px;font-weight:500;padding:2px 8px;border-radius:6px;background:#fef3c7;border:1px solid #fcd34d;color:#b45309;margin-left:6px}
+    .odx-file-meta{flex:1;min-width:0;padding-left:2px}`;
   document.head.appendChild(style);
   const el = document.createElement("div");
   el.id = "orderDetailOverlay";
@@ -3933,10 +3951,6 @@ function renderOrderDetailBody(order) {
         : L.agreement === "reviewing"
         ? `<div class="odx-note">已回传签署文件，工作室审核中，通过后即可支付。</div>`
         : `<div class="odx-note">销售正在准备协议，请稍候。</div>`;
-    } else if (L.agreement === "reviewing") {
-      // 员工端：客户已回传，可查看文件并审核
-      action = `<div class="odx-file"><div><div class="n">${escapeHtml(order.signedFileName || "客户签署文件")}</div><div class="s">客户回传于 ${escapeHtml(order.signedSubmittedAt || "—")}</div></div><button class="odx-btn" data-od-action="view-signed">下载</button></div>
-        <div class="odx-btnrow"><button class="odx-btn dark" data-od-action="approve-sign">审核通过</button><button class="odx-btn" style="color:#dc2626;border-color:#f3c0c0" data-od-action="reject-sign">驳回</button></div>`;
     } else {
       action = L.agreement === "no_agreement"
         ? `<button class="odx-btn dark" style="width:100%" data-od-action="upload-agreement">上传协议</button>`
@@ -3949,10 +3963,8 @@ function renderOrderDetailBody(order) {
   } else if (L.payment !== "paid") {
     action = isCustomer
       ? `<div class="odx-note">合同已生效，请完成付款以解锁正式交付文件。</div>
-         <button class="odx-btn dark" style="width:100%;margin-top:12px" data-od-action="pay">立即支付</button>
-         <button class="odx-btn" style="width:100%;margin-top:8px" data-od-action="mark-paid">标记为已支付（TEST）</button>`
-      : `<div class="odx-note">已签署，等待客户付款。付款成功后自动解锁交付。</div>
-         <button class="odx-btn" style="margin-top:12px" data-od-action="mark-paid">标记为已支付（TEST）</button>`;
+         <button class="odx-btn dark" style="width:100%;margin-top:12px" data-od-action="pay">立即支付</button>`
+      : `<div class="odx-note">已签署，等待客户付款。付款成功后自动解锁交付。</div>`;
   } else {
     // 已付款 / 已签署
     if (isCustomer) {
@@ -3963,10 +3975,17 @@ function renderOrderDetailBody(order) {
       action = `<button class="odx-btn ${L.delivered ? "" : "dark"}" style="width:100%" data-od-action="toggle-deliver">${L.delivered ? "取消交付" : "交付并解锁作品"}</button>`;
     }
   }
-  // 未付款/未签署时，客户侧展示锁定预览
-  const lockPreview = (isCustomer && !L.delivered) ? `<div class="odx-card"><div class="odx-pt">交付文件（未解锁）</div>
-    <div class="odx-note">付款成功后自动解锁正式交付文件。当前仅可确认所购花型。</div>
-    <div class="odx-locks">${patterns.slice(0, 3).map((f) => { const c = sourceCardByFile(f); const bg = c?.dataset.imageData ? `background-image:url('${c.dataset.imageData}')` : ""; return `<div class="odx-lock" style="${bg}"><div class="ov">🔒 付款后解锁</div></div>`; }).join("")}</div></div>` : "";
+  // 员工端：客户回传的签署文件（不阻塞支付，仅供核验存档）
+  const signedCard = (!isCustomer && order.signedFileUploaded) ? `<div class="odx-card">
+    <div class="odx-pt">客户签署文件${order.signedReviewPending ? ` <span class="odx-badge">待核验</span>` : ""}</div>
+    <div class="odx-file">
+      <div class="odx-file-meta"><div class="n">${escapeHtml(order.signedFileName || "已签署文件")}</div>
+      <div class="s">回传于 ${escapeHtml(order.signedSubmittedAt || "—")}</div></div>
+      <button class="odx-btn" data-od-action="view-signed">下载</button>
+    </div>
+    ${order.signedReviewPending ? `<div class="odx-btnrow"><button class="odx-btn dark" data-od-action="ack-signed">标记已核验</button><button class="odx-btn" style="color:#dc2626;border-color:#f3c0c0" data-od-action="reject-sign">要求重新签署</button></div>` : ""}
+  </div>` : "";
+  const lockPreview = "";
 
   body.innerHTML = `
     <div class="odx-card odx-order">
@@ -3985,7 +4004,7 @@ function renderOrderDetailBody(order) {
       </div>
       <div style="margin-top:18px">${action}</div>
     </div>
-    ${lockPreview}
+    ${signedCard}${lockPreview}
     ${(order.activity && order.activity.length) ? `<div class="odx-card"><div class="odx-pt">订单动态</div>
       <div class="odx-feed">${order.activity.slice(0, 12).map((a) => `<div class="odx-ev"><span class="odx-ev-who ${a.who === "客户" ? "cust" : ""}">${escapeHtml(a.who)}</span><div><div class="odx-ev-t">${escapeHtml(a.text)}</div><div class="odx-ev-d">${escapeHtml(a.t)}</div></div></div>`).join("")}</div></div>` : ""}
     <div class="odx-card"><div class="odx-pt">本单花型（${patterns.length}）</div>
@@ -3996,6 +4015,90 @@ function renderOrderDetailBody(order) {
     btn.addEventListener("click", () => onOrderDetailAction(btn.dataset.odAction, order));
   });
 }
+/* ============ 支付页对接：把真实订单数据交给 pay.html，并接收支付结果 ============ */
+const PAY_PAYLOAD_KEY = "king_pay_payload";
+const PAY_RESULT_KEY = "king_pay_result";
+
+function openPaymentPage(order) {
+  if (!order) return;
+  const patterns = orderPatternList(order);
+  const items = patterns.map((f) => {
+    const card = sourceCardByFile(f);
+    return {
+      file: f,
+      name: card?.querySelector(".work-head strong")?.textContent.trim() || f,
+      code: card?.dataset.code || f,
+      colors: Number(card?.dataset.colors || 1),
+      thumb: card?.dataset.imageData || "",
+      license: order.licenseType || "非独家授权",
+    };
+  });
+  const subtotal = Number(order.subtotal != null ? order.subtotal : (order.price != null ? order.price : patterns.length * 100));
+  const discount = Number(order.discount || 0);
+  const payload = {
+    orderId: order.id,
+    customer: order.customer || "",
+    createdAt: order.createdAt || "",
+    license: order.licenseType || "非独家授权",
+    subtotal, discount, payable: Math.max(subtotal - discount, 0),
+    items,
+  };
+  try { sessionStorage.setItem(PAY_PAYLOAD_KEY, JSON.stringify(payload)); } catch {}
+  logOrderEvent(order, "客户进入支付页", "客户");
+  saveStudioState();
+  window.location.href = `./pay.html?order=${encodeURIComponent(order.id)}`;
+}
+
+// 从支付页返回后，应用支付结果（支付成功以此处入账为准）
+function applyPendingPaymentResult() {
+  let raw = null;
+  try { raw = localStorage.getItem(PAY_RESULT_KEY); } catch {}
+  if (!raw) return;
+  try { localStorage.removeItem(PAY_RESULT_KEY); } catch {}
+  let res = null;
+  try { res = JSON.parse(raw); } catch { return; }
+  if (!res?.orderId || !res.paid) return;
+  const order = studioOrders.find((o) => o.id === res.orderId);
+  if (!order || order.paymentStatus === "已支付") return;
+  order.paymentStatus = "已支付";
+  order.paidAt = res.at || formatDateTime();
+  order.paidAmount = res.amount;
+  order.paidMethod = res.method || "";
+  logOrderEvent(order, `支付成功${res.method ? "（" + res.method + "）" : ""}${res.test ? " · TEST 模拟" : ""}`, "客户");
+  saveStudioState();
+  if (typeof renderOrderCenter === "function") renderOrderCenter();
+  if (typeof renderMyOrders === "function") renderMyOrders();
+  if (typeof renderMyPatternLibrary === "function") renderMyPatternLibrary();
+  updateSidebarBadges();
+  showToast(`订单 ${order.id} 支付成功，花型已加入你的花型库（待交付解锁）。`, "success");
+}
+window.addEventListener("focus", applyPendingPaymentResult);
+
+/* ============ 侧边栏小圆点通知 ============ */
+function updateSidebarBadges() {
+  const dot = (viewName, count) => {
+    const nav = document.querySelector(`.nav-item[data-view="${viewName}"]`);
+    if (!nav) return;
+    let d = nav.querySelector(".nav-dot");
+    if (count > 0) {
+      if (!d) { d = document.createElement("span"); d.className = "nav-dot"; nav.appendChild(d); }
+      d.textContent = count > 99 ? "99+" : String(count);
+    } else if (d) d.remove();
+  };
+  const mine = studioOrders.filter(orderBelongsToCurrentAccount);
+  if (currentAccount.role === "客户") {
+    // 客户：需要我处理的（待签署 / 待支付）
+    const todo = mine.filter((o) => ["signing", "paying"].includes(moStage(o))).length;
+    dot("myOrders", todo);
+    // 花型库：新解锁的交付
+    dot("myLibrary", mine.filter((o) => o.deliverStatus === "已交付" && !o.customerSeenDelivery).length);
+  } else {
+    // 员工：客户有新动作（回传签署件 / 已支付待交付）
+    const need = mine.filter((o) => o.signedReviewPending || (o.paymentStatus === "已支付" && orderDeliverStatus(o) !== "已交付")).length;
+    dot("orders", need);
+  }
+}
+
 /* ================= 客户端 · 订单中心 ================= */
 const MO_PAGE_SIZE = 8;
 let moFilter = "all";
@@ -4114,32 +4217,28 @@ function onOrderDetailAction(action, order) {
   };
   if (action === "upload-agreement") { closeOrderDetail(); openDeliveryAgreementModal(order, false); }
   else if (action === "sign") { closeOrderDetail(); openDeliveryAgreementModal(order, true); }
-  else if (action === "view-signed") { showToast(`正在下载：${order.signedFileName || "客户签署文件"}（TEST 占位）`, "success"); }
-  else if (action === "approve-sign") {
-    order.agreementStatus = "已签署";
-    order.agreementSignedAt = formatDateTime();
-    logOrderEvent(order, "签署文件审核通过，订单进入待支付", currentAccount.role || "员工");
-    order.unreadForStaff = 0;
-    refresh("已通过签署审核，客户可以支付了。");
+  else if (action === "view-signed") {
+    if (order.signedFileKey) downloadStoredFile(order.signedFileKey, order.signedFileName);
+    else showToast("暂无可下载的签署文件。", "warning");
+  }
+  else if (action === "ack-signed") {
+    order.signedReviewPending = false;
+    logOrderEvent(order, "签署文件已核验存档", currentAccount.role || "员工");
+    updateSidebarBadges();
+    refresh("已标记为核验通过。");
   } else if (action === "reject-sign") {
-    const remark = window.prompt("驳回原因（会展示给客户）：", "缺少盖章");
+    const remark = window.prompt("要求重新签署的原因（会展示给客户）：", "缺少盖章");
     if (remark === null) return;
     order.agreementStatus = "审核驳回";
     order.reviewRemark = remark;
     order.signedFileUploaded = false;
-    logOrderEvent(order, `签署文件被驳回：${remark}`, currentAccount.role || "员工");
-    order.unreadForStaff = 0;
-    refresh("已驳回，客户可重新上传。");
+    order.signedReviewPending = false;
+    logOrderEvent(order, `要求客户重新签署：${remark}`, currentAccount.role || "员工");
+    updateSidebarBadges();
+    refresh("已通知客户重新上传签署文件。");
   } else if (action === "pay") {
-    logOrderEvent(order, "客户进入支付页", "客户");
-    saveStudioState();
-    window.open("./pay.html", "_blank");
-  } else if (action === "mark-paid") {
-    order.paymentStatus = "已支付";
-    order.paidAt = formatDateTime();
-    if (order.deliveryPrepared) order.deliverStatus = order.deliverStatus || "未交付";
-    logOrderEvent(order, "支付成功（TEST 模拟标记）", currentAccount.role === "客户" ? "客户" : "员工");
-    refresh("已标记为已支付（TEST）。");
+    closeOrderDetail();
+    openPaymentPage(order);
   } else if (action === "toggle-deliver") {
     order.deliverStatus = orderDeliverStatus(order) === "已交付" ? "未交付" : "已交付";
     logOrderEvent(order, `订单已标记为${order.deliverStatus}`, currentAccount.role || "员工");
@@ -4211,14 +4310,43 @@ function agreementUploadHtml(order) {
     </label>`;
 }
 
-document.querySelector("#deliveryAgreementSummary")?.addEventListener("change", (event) => {
+/* 真实文件存取：上传的协议 / 签署件存入 IndexedDB，下载时还原成真实文件 */
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+async function downloadStoredFile(key, filename) {
+  try {
+    const data = await resolveImageSource(key);
+    if (!data) { showToast("文件不存在或已失效。", "warning"); return; }
+    const a = document.createElement("a");
+    a.href = data;
+    a.download = filename || "download";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch (e) {
+    showToast("下载失败，请重试。", "warning");
+  }
+}
+
+document.querySelector("#deliveryAgreementSummary")?.addEventListener("change", async (event) => {
   const order = studioOrders.find((item) => item.id === activeAgreementOrderId);
   if (!order) return;
   // 员工端：上传合同/协议
   const agrInput = event.target.closest("#agreementFileInput");
   if (agrInput && agrInput.files?.length) {
+    const file = agrInput.files[0];
+    const key = `agreement_${order.id}_${Date.now()}`;
+    try { await saveImageToDB(key, await readFileAsDataUrl(file)); } catch {}
     order.agreementUploaded = true;
-    order.agreementFileName = agrInput.files[0].name;
+    order.agreementFileName = file.name;
+    order.agreementFileKey = key;
+    order.agreementFileSize = file.size;
     order.agreementUploadedAt = formatDateTime();
     logOrderEvent(order, `上传协议：${order.agreementFileName}`, currentAccount.role || "员工");
     saveStudioState();
@@ -4229,8 +4357,12 @@ document.querySelector("#deliveryAgreementSummary")?.addEventListener("change", 
   // 客户端：上传已签署文件
   const signedInput = event.target.closest("#signedFileInput");
   if (signedInput && signedInput.files?.length) {
+    const file = signedInput.files[0];
+    const key = `signed_${order.id}_${Date.now()}`;
+    try { await saveImageToDB(key, await readFileAsDataUrl(file)); } catch {}
     order.signedFileUploaded = true;
-    order.signedFileName = signedInput.files[0].name;
+    order.signedFileName = file.name;
+    order.signedFileKey = key;
     saveStudioState();
     openDeliveryAgreementModal(order, true); // 重渲染以启用「提交签署文件」
     showToast(`已上传签署文件：${order.signedFileName}`, "success");
@@ -4239,7 +4371,9 @@ document.querySelector("#deliveryAgreementSummary")?.addEventListener("change", 
 document.querySelector("#deliveryAgreementSummary")?.addEventListener("click", (event) => {
   if (!event.target.closest("#agreementViewFile")) return;
   const order = studioOrders.find((item) => item.id === activeAgreementOrderId);
-  showToast(`正在打开协议文件：${order?.agreementFileName || "KiNG_授权协议.pdf"}（TEST 占位）`, "success");
+  if (!order) return;
+  if (order.agreementFileKey) downloadStoredFile(order.agreementFileKey, order.agreementFileName);
+  else showToast("工作室尚未上传协议文件。", "warning");
 });
 
 function openDeliveryAgreementModal(order, customerMode = false) {
@@ -4299,8 +4433,10 @@ document.querySelector("#deliveryAgreementSubmit")?.addEventListener("click", (e
   const customerMode = event.currentTarget.dataset.agreementMode === "customer";
   if (customerMode) {
     if (!order.signedFileUploaded) return;               // 必须先上传已签署文件
-    order.agreementStatus = "客户已回传";                  // 进入内部审核，员工审核通过才算已签署
+    // 回传即完成签约，直接进入待支付（内部核验不阻塞客户付款）
+    order.agreementStatus = "已签署";
     order.signedSubmittedAt = formatDateTime();
+    order.signedReviewPending = true;                     // 员工侧提示：有签署件待核验
     order.agreementSignedBy = currentAccount.name || currentAccount.company || "客户";
     logOrderEvent(order, `客户回传签署文件：${order.signedFileName || "已签署文件"}`, "客户");
     saveStudioState();
@@ -4308,8 +4444,8 @@ document.querySelector("#deliveryAgreementSubmit")?.addEventListener("click", (e
     renderOrderCenter();
     if (typeof renderMyOrders === "function") renderMyOrders();
     closeDeliveryAgreementModal();
-    if (activeOrderDetailId === order.id) openOrderDetail(order.id);
-    showToast("签署文件已提交，工作室审核通过后即可支付。", "success");
+    showToast("签署完成，正在前往支付…", "success");
+    openPaymentPage(order);                               // 直接跳转支付
     return;
   }
   if (orderAgreementStatus(order) !== "待客户签署") {
@@ -10665,14 +10801,20 @@ function renderVlibGallery() {
   const grid = document.querySelector("#vlibGallery");
   if (!grid) return;
   const cards = vlibFilteredCards();
+  // 该客户已购买过的花型不可再次购买（回购去重）
+  const owned = customerPurchasedFiles(viewerSession?.companyName || currentAccount.company || "");
   grid.innerHTML = cards.length ? cards.map((card) => {
-    const picked = libraryCart.has(card.dataset.file);
+    const file = card.dataset.file;
+    const isOwned = owned.has(file);
+    const picked = libraryCart.has(file);
     const colors = Number(card.dataset.colors || 1);
     const check = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    return `<div class="vlib-card ${picked ? "picked" : ""}" data-vlib-work="${escapeHtml(card.dataset.file)}">
+    return `<div class="vlib-card ${picked ? "picked" : ""} ${isOwned ? "owned" : ""}" data-vlib-work="${escapeHtml(file)}">
       <div class="vlib-thumb" style="${card.dataset.imageData ? `background-image:url('${card.dataset.imageData}')` : ""}"></div>
-      <button class="vlib-add ${picked ? "added" : ""}" type="button" data-vlib-add="${escapeHtml(card.dataset.file)}" aria-label="${picked ? "已选，点击取消" : "加入选稿"}">${picked ? check : "+"}</button>
-      <div class="vlib-hover"><strong>${escapeHtml(card.dataset.file)}</strong><span>${colors} 配色</span></div>
+      ${isOwned
+        ? `<span class="vlib-owned-tag">已购买</span>`
+        : `<button class="vlib-add ${picked ? "added" : ""}" type="button" data-vlib-add="${escapeHtml(file)}" aria-label="${picked ? "已选，点击取消" : "加入选稿"}">${picked ? check : "+"}</button>`}
+      <div class="vlib-hover"><strong>${escapeHtml(file)}</strong><span>${isOwned ? "已购买，无需重复选择" : `${colors} 配色`}</span></div>
     </div>`;
   }).join("") : `<p class="empty-state">未找到符合条件的花型。</p>`;
 }
@@ -11097,18 +11239,35 @@ document.querySelector("#cartCustomerList")?.addEventListener("click", (event) =
 })();
 
 // ================= 客户端：我的花型库（已交付） =================
+function customerOwnsOrder(o, company) {
+  const mine = String(company || "").trim().toLowerCase();
+  return !!mine && String(o.customer || "").trim().toLowerCase() === mine;
+}
 function customerDeliveredFiles(company) {
   const files = new Set();
   (studioOrders || []).forEach((o) => {
-    if (
-      orderDeliverStatus(o) === "已交付"
-      && orderAgreementStatus(o) === "已签署"
-      && String(o.customer || "").includes(company)
-    ) {
+    if (orderDeliverStatus(o) === "已交付" && orderAgreementStatus(o) === "已签署" && customerOwnsOrder(o, company)) {
       orderPatternList(o).forEach((f) => files.add(f));
     }
   });
   return [...files];
+}
+/** 已付款但尚未交付 -> 花型已属于客户，但处于「待解锁」状态 */
+function customerLockedFiles(company) {
+  const delivered = new Set(customerDeliveredFiles(company));
+  const locked = new Map(); // file -> orderId
+  (studioOrders || []).forEach((o) => {
+    if (o.paymentStatus === "已支付" && orderDeliverStatus(o) !== "已交付" && customerOwnsOrder(o, company)) {
+      orderPatternList(o).forEach((f) => { if (!delivered.has(f)) locked.set(f, o.id); });
+    }
+  });
+  return locked;
+}
+/** 客户已购买（含待解锁）的全部花型 —— 用于回购时禁止重复购买 */
+function customerPurchasedFiles(company) {
+  const set = new Set(customerDeliveredFiles(company));
+  customerLockedFiles(company).forEach((_id, f) => set.add(f));
+  return set;
 }
 
 function customerAgreementOrders(company) {
@@ -11154,18 +11313,33 @@ function renderMyPatternLibrary() {
   if (title) title.textContent = `我的花型库 · ${company}`;
   renderCustomerAgreementSection(company);
   const files = customerDeliveredFiles(company);
-  grid.innerHTML = files.length ? files.map((f) => {
+  const locked = customerLockedFiles(company);
+  const lockIcon = `<svg class="mylib-lock-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2"/><path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9"/><circle cx="12" cy="15.4" r="1.5"/></svg>`;
+  const cell = (f, isLocked, orderId) => {
     const card = sourceCardByFile(f);
     const img = card?.dataset.imageData ? `background-image:url('${card.dataset.imageData}')` : "";
     const colors = Number(card?.dataset.colors || 1);
     const name = card?.querySelector(".work-head strong")?.textContent.trim() || f;
-    return `<button class="mylib-card" type="button" data-mylib-file="${escapeHtml(f)}">
-      <span class="mylib-thumb" style="${img}"></span>
-      <span class="mylib-info"><strong>${escapeHtml(name)}</strong><small>${colors} 配色</small></span>
+    return `<button class="mylib-card ${isLocked ? "locked" : ""}" type="button" ${isLocked ? `data-mylib-locked="${escapeHtml(orderId || "")}"` : `data-mylib-file="${escapeHtml(f)}"`}>
+      <span class="mylib-thumb" style="${img}">${isLocked ? `<span class="mylib-lock">${lockIcon}<small>等待交付解锁</small></span>` : ""}</span>
+      <span class="mylib-info"><strong>${escapeHtml(name)}</strong><small>${isLocked ? "已购买 · 待解锁" : `${colors} 配色`}</small></span>
     </button>`;
-  }).join("") : `<p class="empty-state">还没有已交付给你的花型。工作室在订单中心点击「交付」后，会显示在这里。</p>`;
+  };
+  const html = [...locked.keys()].map((f) => cell(f, true, locked.get(f))).join("") + files.map((f) => cell(f, false)).join("");
+  grid.innerHTML = html || `<p class="empty-state">还没有属于你的花型。完成付款后，购买的花型会出现在这里。</p>`;
+  // 客户已看过交付
+  if (files.length) {
+    studioOrders.forEach((o) => { if (customerOwnsOrder(o, company) && orderDeliverStatus(o) === "已交付") o.customerSeenDelivery = true; });
+  }
+  updateSidebarBadges();
 }
 document.querySelector("#myLibraryGrid")?.addEventListener("click", (e) => {
+  const lockedCell = e.target.closest("[data-mylib-locked]");
+  if (lockedCell) {
+    const oid = lockedCell.dataset.mylibLocked;
+    if (oid) openOrderDetail(oid); else showToast("该花型待工作室交付后解锁。", "warning");
+    return;
+  }
   const c = e.target.closest("[data-mylib-file]");
   if (!c) return;
   const card = sourceCardByFile(c.dataset.mylibFile);

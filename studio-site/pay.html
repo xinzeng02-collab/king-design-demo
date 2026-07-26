@@ -131,17 +131,7 @@
       <h1>确认并支付</h1>
       <p class="lead">请选择支付方式并在有效时间内完成付款，以确保订单顺利处理。</p>
 
-      <div class="card order">
-        <div class="thumb" id="thumb"></div>
-        <div>
-          <h3 id="pName">缠枝莲团花</h3>
-          <div class="meta">
-            花型编号　<b id="pCode">KP-2026-0148</b><br>
-            订单编号　<b id="oNo">DD-20260726-0007</b>
-          </div>
-          <span class="chip" id="lic">非独家授权</span>
-        </div>
-      </div>
+      <div id="orderCards"></div>
 
       <div class="sec-title">选择支付方式</div>
       <div id="methodList"></div>
@@ -151,10 +141,10 @@
     <div class="right">
       <div class="card">
         <div class="sum-title">订单摘要</div>
-        <div class="sum-row"><span>商品金额</span><span id="subtotal">¥1,200.00</span></div>
-        <div class="sum-row"><span>优惠金额</span><span id="discount">−¥200.00</span></div>
+        <div class="sum-row"><span>商品金额</span><span id="subtotal">—</span></div>
+        <div class="sum-row"><span>优惠金额</span><span id="discount">—</span></div>
         <div class="sum-div"></div>
-        <div class="sum-total"><span class="l">应付金额</span><span class="v" id="payable">¥1,000.00</span></div>
+        <div class="sum-total"><span class="l">应付金额</span><span class="v" id="payable">—</span></div>
         <div class="timer">
           <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>
           支付剩余 <b id="orderCd">12:50</b>
@@ -178,6 +168,56 @@ const ICONS = {
 };
 function iconBox(key,size){const bg={wechat:'#22ac38',alipay:'#1677ff',unionpay:'#e60012',bank:'#78716c'}[key];
   return `<span class="ico" style="background:${bg}">${ICONS[key]}</span>`;}
+
+// ---------- 载入真实订单数据（由主应用通过 sessionStorage 传入）----------
+const PAY_PAYLOAD_KEY = "king_pay_payload";
+const PAY_RESULT_KEY = "king_pay_result";
+let ORDER = null;
+try { ORDER = JSON.parse(sessionStorage.getItem(PAY_PAYLOAD_KEY) || "null"); } catch {}
+
+const fmt = (n) => "¥" + Number(n || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+function renderOrder() {
+  const box = document.getElementById("orderCards");
+  if (!ORDER) {
+    box.innerHTML = `<div class="card"><div style="color:#57534e;font-size:14px">
+      未获取到订单信息。请回到「订单中心」，点击订单的「立即支付」进入本页。</div></div>`;
+    document.getElementById("payable").textContent = "—";
+    return;
+  }
+  const items = ORDER.items || [];
+  box.innerHTML = `<div class="card">
+    ${items.map((it, i) => `
+      <div class="order" style="${i ? "margin-top:18px;padding-top:18px;border-top:1px solid var(--line)" : ""}">
+        <div class="thumb" style="${it.thumb ? `background-image:url('${it.thumb}');background-size:cover;background-position:center` : ""}"></div>
+        <div>
+          <h3>${it.name || it.file}</h3>
+          <div class="meta">花型编号　<b>${it.code || it.file}</b>${it.colors ? `<br>配色数量　<b>${it.colors}</b>` : ""}</div>
+          <span class="chip">${it.license || "非独家授权"}</span>
+        </div>
+      </div>`).join("")}
+    <div class="meta" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)">
+      订单编号　<b style="color:var(--ink)">${ORDER.orderId}</b>　·　共 ${items.length} 款花型
+    </div>
+  </div>`;
+  document.getElementById("subtotal").textContent = fmt(ORDER.subtotal);
+  document.getElementById("discount").textContent = ORDER.discount ? "−" + fmt(ORDER.discount) : fmt(0);
+  document.getElementById("payable").textContent = fmt(ORDER.payable);
+}
+renderOrder();
+
+// 支付成功回写（TEST 模拟）：写入结果，由主应用入账
+function markPaid(method) {
+  if (!ORDER) return;
+  try {
+    localStorage.setItem(PAY_RESULT_KEY, JSON.stringify({
+      orderId: ORDER.orderId, paid: true, amount: ORDER.payable,
+      method: method || (selected ? selected.name : ""), test: true, at: new Date().toLocaleString("zh-CN"),
+    }));
+  } catch {}
+  setState("success");
+  setTimeout(() => { window.location.href = "./index.html"; }, 1200);
+}
 
 // ---------- 设备 & Apple Pay 探测 ----------
 const isMobile=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
@@ -240,7 +280,8 @@ function renderPanel(){
       <p class="bank-note">转账完成后，请上传付款凭证以便我们尽快核对并确认。到账以财务确认为准。</p>
       <div class="drop" onclick="alert('TEST：上传付款凭证（占位）')">
         <div class="up">↑</div><div class="t">上传付款凭证</div><div class="h">支持 JPG / PNG / PDF，单个文件不超过 10MB</div>
-      </div>`;
+      </div>
+      <button class="btn-dark" style="background:#15703c" onclick="markPaid('对公转账')">标记为已支付（TEST）</button>`;
     return;
   }
   const isQR = !isMobile || selected.key==="wechat_native"||selected.key==="alipay_page";
@@ -254,7 +295,8 @@ function renderPanel(){
       <div class="qr-valid">二维码有效期 <b id="qrCd">04:59</b></div>
       <button class="refresh" onclick="qrRemain=299;renderPanel()"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg> 刷新二维码</button>
     </div>
-    <button class="btn-dark" onclick="setState('cancelled')">取消支付</button>`;
+    <button class="btn-dark" style="background:#15703c" onclick="markPaid()">标记为已支付（TEST）</button>
+    <button class="btn-dark" style="background:#fff;color:var(--ink-2);border:1px solid var(--line-2);margin-top:8px" onclick="setState('cancelled')">取消支付</button>`;
   const cv=document.getElementById("qrc"); if(cv) drawQR(cv, selected.color);
 }
 

@@ -9431,6 +9431,22 @@ body.viewer-open { overflow: hidden; }
 .order-expand-btn { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--color-text-secondary); font-size: 13px; cursor: pointer; display: grid; place-items: center; transition: transform .15s; }
 .order-expand-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
 .order-expand-btn.open { transform: translateY(-50%) rotate(180deg); }
+/* 侧边栏小圆点通知 */
+.nav-item { position: relative; }
+.nav-dot { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 600; display: grid; place-items: center; line-height: 1; }
+
+/* 我的花型库：已购买待解锁 */
+.mylib-card.locked { cursor: pointer; }
+.mylib-card .mylib-thumb { position: relative; }
+.mylib-lock { position: absolute; inset: 0; background: rgba(20,18,16,.52); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #fff; border-radius: inherit; }
+.mylib-lock small { font-size: 11px; letter-spacing: .02em; }
+.mylib-lock-ic { width: 26px; height: 26px; fill: none; stroke: #fff; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.mylib-card.locked .mylib-info strong { color: var(--color-text-secondary); }
+
+/* 看稿库：已购买的花型不可重复选择 */
+.vlib-card.owned .vlib-thumb { filter: grayscale(.35) brightness(.94); }
+.vlib-owned-tag { position: absolute; right: 10px; top: 10px; background: rgba(20,18,16,.82); color: #fff; font-size: 11px; padding: 4px 10px; border-radius: 6px; }
+
 /* 订单行状态旗标：客户有新动作时提醒员工 */
 .order-flag { display: inline-block; margin-left: 6px; font-size: 11px; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
 .order-flag.act { background: #fef3c7; border: 1px solid #fcd34d; color: #b45309; }
@@ -9472,14 +9488,14 @@ body.viewer-open { overflow: hidden; }
   .mo-search input { width: 100%; }
 }
 
-/* 协议信息行：每行都有分隔线，左右两端对齐，间距一致 */
-.agr-info { display: grid; margin-bottom: 18px; border-top: 1px solid var(--line, #eae8e4); }
-.agr-info > div { display: flex; justify-content: space-between; align-items: baseline; gap: 24px; font-size: 13px; color: var(--color-text-secondary); padding: 11px 0; border-bottom: 1px solid var(--line, #eae8e4); }
+/* 协议信息行：无分隔线，干净留白 */
+.agr-info { display: grid; gap: 12px; margin-bottom: 20px; }
+.agr-info > div { display: flex; justify-content: space-between; align-items: baseline; gap: 24px; font-size: 13px; color: var(--color-text-secondary); }
 .agr-info span { flex: none; letter-spacing: .02em; }
 .agr-info strong { color: var(--color-primary); font-weight: 500; text-align: right; word-break: break-all; }
-/* 协议文件行：文件名+类型靠最左，右侧只保留一个下载按钮 */
-.agr-file-row { display: flex; align-items: center; gap: 16px; border: 1px solid var(--line, #eae8e4); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
-.agr-file-meta { flex: 1; min-width: 0; text-align: left; }
+/* 协议文件行：文件名+类型靠左但不顶格，右侧只保留一个下载按钮 */
+.agr-file-row { display: flex; align-items: center; gap: 16px; border: 1px solid var(--line, #eae8e4); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+.agr-file-meta { flex: 1; min-width: 0; text-align: left; padding-left: 2px; }
 .agr-file-n { font-size: 14px; font-weight: 500; color: var(--color-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agr-file-s { font-size: 12px; color: var(--color-text-tertiary, #a8a29e); margin-top: 2px; }
 .agr-view-btn { flex: none; padding: 8px 16px; border: 1px solid var(--color-border-strong, #d6d3d1); border-radius: 8px; background: #fff; font-size: 13px; cursor: pointer; color: var(--color-primary); }
