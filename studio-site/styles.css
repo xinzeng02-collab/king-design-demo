@@ -9080,12 +9080,17 @@ body.viewer-open { overflow: hidden; }
 .viewer-banner.hidden { display: none; }
 .viewer-select-bar { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 90; display: flex; align-items: center; gap: 20px; padding: 12px 16px 12px 22px; border-radius: 999px; background: rgba(20,20,20,0.94); box-shadow: 0 18px 44px rgba(0,0,0,0.24); }
 .viewer-select-bar.hidden { display: none; }
-.viewer-select-count { color: #fff; font-size: 14px; font-weight: 600; }
+/* 计数：纯文本，不是按钮 */
+.viewer-select-count { color: #fff; font-size: 14px; font-weight: 600; padding-right: 20px; border-right: 1px solid rgba(255,255,255,0.18); }
 .viewer-select-count.viewer-count-bump { animation: viewerCountBump .32s ease; }
 @keyframes viewerCountBump { 50% { transform: scale(1.12); color: #fff; } }
-.viewer-select-actions { display: flex; gap: 8px; }
-.viewer-select-bar .ghost-button { color: #fff; border-color: rgba(255,255,255,0.35); background: transparent; }
+/* 三部分视觉与功能分开：计数 | 查看已选（次要） | 完成本次选稿（主要） */
+.viewer-select-actions { display: flex; gap: 12px; align-items: center; }
+.viewer-select-bar .ghost-button { color: #fff; border-color: rgba(255,255,255,0.35); background: transparent; border-radius: 8px; }
 .viewer-select-bar .ghost-button:hover { background: rgba(255,255,255,0.12); }
+/* 完成本次选稿：默认黑底白字，hover 变深绿 —— 高级克制，不用荧光绿 */
+.viewer-select-bar .primary-button { background: #111; color: #fff; border: 1px solid rgba(255,255,255,0.9); border-radius: 8px; font-weight: 600; transition: background .18s, border-color .18s, color .18s; }
+.viewer-select-bar .primary-button:hover { background: #15703c; border-color: #15703c; color: #fff; }
 
 /* 客户专属作品库 */
 #library.viewer-library-active > .customer-center-head {
@@ -9426,9 +9431,16 @@ body.viewer-open { overflow: hidden; }
 .order-expand-btn { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--color-text-secondary); font-size: 13px; cursor: pointer; display: grid; place-items: center; transition: transform .15s; }
 .order-expand-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
 .order-expand-btn.open { transform: translateY(-50%) rotate(180deg); }
-.agr-info { display: grid; gap: 6px; margin-bottom: 14px; }
-.agr-info > div { display: flex; justify-content: space-between; font-size: 13px; color: var(--color-text-secondary); }
-.agr-info strong { color: var(--color-primary); font-weight: 500; }
+.agr-info { display: grid; gap: 10px; margin-bottom: 18px; }
+.agr-info > div { display: flex; justify-content: space-between; align-items: baseline; gap: 24px; font-size: 13px; color: var(--color-text-secondary); padding-bottom: 8px; border-bottom: 1px solid var(--line, #eae8e4); }
+.agr-info > div:last-child { border-bottom: 0; padding-bottom: 0; }
+.agr-info span { flex: none; letter-spacing: .02em; }
+.agr-info strong { color: var(--color-primary); font-weight: 500; text-align: right; word-break: break-all; }
+.agr-file-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid var(--line, #eae8e4); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+.agr-file-n { font-size: 14px; font-weight: 500; color: var(--color-primary); }
+.agr-file-s { font-size: 12px; color: var(--color-text-tertiary, #a8a29e); margin-top: 2px; }
+.agr-view-btn { flex: none; padding: 8px 14px; border: 1px solid var(--color-border-strong, #d6d3d1); border-radius: 8px; background: #fff; font-size: 13px; cursor: pointer; color: var(--color-primary); }
+.agr-view-btn:hover { border-color: var(--color-primary); }
 .agr-upload { display: block; border: 1.5px dashed var(--color-border-strong, #d6d3d1); border-radius: 10px; padding: 22px; text-align: center; cursor: pointer; }
 .agr-upload:hover { border-color: var(--color-primary); background: #fafaf9; }
 .agr-upload.done { border-style: solid; border-color: var(--color-success, #16a34a); }

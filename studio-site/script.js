@@ -3979,6 +3979,25 @@ function agreementTermsHtml(order) {
     </ol>`;
 }
 
+function agreementCustomerHtml(order) {
+  const signed = order.signedFileUploaded;
+  return `<div class="agr-info">
+      <div><span>订单</span><strong>${escapeHtml(order.id)}</strong></div>
+      <div><span>授权作品</span><strong>${orderPatternList(order).length} 款花型</strong></div>
+      <div><span>订单金额</span><strong>¥${(order.price != null ? Number(order.price) : orderPatternList(order).length * 100).toFixed(2)}</strong></div>
+    </div>
+    <div class="agr-file-row">
+      <div><div class="agr-file-n">${escapeHtml(order.agreementFileName || "KiNG_授权协议.pdf")}</div><div class="agr-file-s">协议文件</div></div>
+      <button class="agr-view-btn" type="button" id="agreementViewFile">查看 / 下载</button>
+    </div>
+    <label class="agr-upload ${signed ? "done" : ""}">
+      <input type="file" id="signedFileInput" accept=".pdf,.doc,.docx,.jpg,.png" hidden />
+      <div class="agr-up-ic">${signed ? "✓" : "↑"}</div>
+      <div class="agr-up-t">${signed ? escapeHtml(order.signedFileName || "已上传签署文件") : "上传已签署文件"}</div>
+      <div class="agr-up-h">${signed ? "点击可重新上传" : "线下签署后回传，支持 PDF / Word / 图片"}</div>
+    </label>`;
+}
+
 function agreementUploadHtml(order) {
   const uploaded = order.agreementUploaded;
   return `<div class="agr-info">
@@ -3995,16 +4014,33 @@ function agreementUploadHtml(order) {
 }
 
 document.querySelector("#deliveryAgreementSummary")?.addEventListener("change", (event) => {
-  const input = event.target.closest("#agreementFileInput");
-  if (!input || !input.files?.length) return;
   const order = studioOrders.find((item) => item.id === activeAgreementOrderId);
   if (!order) return;
-  order.agreementUploaded = true;
-  order.agreementFileName = input.files[0].name;
-  order.agreementUploadedAt = formatDateTime();
-  saveStudioState();
-  openDeliveryAgreementModal(order, false); // 重渲染以启用「发起签约」
-  showToast(`已上传合同：${order.agreementFileName}`, "success");
+  // 员工端：上传合同/协议
+  const agrInput = event.target.closest("#agreementFileInput");
+  if (agrInput && agrInput.files?.length) {
+    order.agreementUploaded = true;
+    order.agreementFileName = agrInput.files[0].name;
+    order.agreementUploadedAt = formatDateTime();
+    saveStudioState();
+    openDeliveryAgreementModal(order, false); // 重渲染以启用「发起签约」
+    showToast(`已上传合同：${order.agreementFileName}`, "success");
+    return;
+  }
+  // 客户端：上传已签署文件
+  const signedInput = event.target.closest("#signedFileInput");
+  if (signedInput && signedInput.files?.length) {
+    order.signedFileUploaded = true;
+    order.signedFileName = signedInput.files[0].name;
+    saveStudioState();
+    openDeliveryAgreementModal(order, true); // 重渲染以启用「提交签署文件」
+    showToast(`已上传签署文件：${order.signedFileName}`, "success");
+  }
+});
+document.querySelector("#deliveryAgreementSummary")?.addEventListener("click", (event) => {
+  if (!event.target.closest("#agreementViewFile")) return;
+  const order = studioOrders.find((item) => item.id === activeAgreementOrderId);
+  showToast(`正在打开协议文件：${order?.agreementFileName || "KiNG_授权协议.pdf"}（TEST 占位）`, "success");
 });
 
 function openDeliveryAgreementModal(order, customerMode = false) {
@@ -4018,15 +4054,16 @@ function openDeliveryAgreementModal(order, customerMode = false) {
   const consent = document.querySelector("#deliveryAgreementConsent");
   const check = document.querySelector("#deliveryAgreementCheck");
   const submit = document.querySelector("#deliveryAgreementSubmit");
-  if (title) title.textContent = customerMode ? "作品交付与授权协议" : "上传协议 / 发起签约";
-  consent?.classList.toggle("hidden", !customerMode);
+  if (title) title.textContent = customerMode ? "查看并签署协议" : "上传协议 / 发起签约";
+  // 同意勾选框不再使用（员工端和客户端都不需要）
+  consent?.classList.add("hidden");
   if (check) check.checked = false;
   if (customerMode) {
-    if (summary) summary.innerHTML = agreementTermsHtml(order);
-    if (message) message.textContent = "请确认授权范围。完成签署后，工作室才能交付并解锁高清文件。";
+    if (summary) summary.innerHTML = agreementCustomerHtml(order);
+    if (message) message.textContent = "请下载协议文件，线下完成签署后回传。审核通过即可进入支付。";
     if (submit) {
-      submit.textContent = "同意并签署";
-      submit.disabled = true;
+      submit.textContent = order.signedFileUploaded ? "提交签署文件" : "请先上传已签署文件";
+      submit.disabled = !order.signedFileUploaded;
       submit.dataset.agreementMode = "customer";
     }
   } else {
@@ -4062,15 +4099,16 @@ document.querySelector("#deliveryAgreementSubmit")?.addEventListener("click", (e
   if (!order) return;
   const customerMode = event.currentTarget.dataset.agreementMode === "customer";
   if (customerMode) {
-    if (!document.querySelector("#deliveryAgreementCheck")?.checked) return;
-    order.agreementStatus = "已签署";
+    if (!order.signedFileUploaded) return;               // 必须先上传已签署文件
+    order.agreementStatus = "已签署";                     // 回传即视为完成签署（内部审核见订单详情）
     order.agreementSignedAt = formatDateTime();
     order.agreementSignedBy = currentAccount.name || currentAccount.company || "客户";
     saveStudioState();
     renderMyPatternLibrary();
     renderOrderCenter();
     closeDeliveryAgreementModal();
-    showToast("协议已签署，工作室现在可以交付本订单作品。", "success");
+    if (activeOrderDetailId === order.id) openOrderDetail(order.id);  // 刷新详情页 -> 进入支付
+    showToast("签署文件已提交，审核通过后即可进入支付。", "success");
     return;
   }
   if (orderAgreementStatus(order) !== "待客户签署") {
@@ -4079,6 +4117,7 @@ document.querySelector("#deliveryAgreementSubmit")?.addEventListener("click", (e
     saveStudioState();
     renderOrderCenter();
     closeDeliveryAgreementModal();
+    if (activeOrderDetailId === order.id) openOrderDetail(order.id);
     showToast(`订单 ${order.id} 的协议已发给客户。`, "success");
     return;
   }
@@ -10661,10 +10700,16 @@ function saveViewerNewClient(startAfter) {
     if (add) {
       e.stopPropagation();
       const file = add.dataset.vlibAdd;
-      if (libraryCart.has(file)) libraryCart.delete(file);
-      else libraryCart.add(file);
+      const picked = !libraryCart.has(file);
+      if (picked) libraryCart.add(file); else libraryCart.delete(file);
+      // 只更新被点击的这一张卡（不再整库重绘，避免上百张图重新解码造成卡顿）
+      const check = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      add.classList.toggle("added", picked);
+      add.innerHTML = picked ? check : "+";
+      add.setAttribute("aria-label", picked ? "已选，点击取消" : "加入选稿");
+      add.closest(".vlib-card")?.classList.toggle("picked", picked);
+      if (vlibSelectedOnly && !picked) add.closest(".vlib-card")?.remove(); // 仅看已选时移除
       renderLibraryCart();
-      renderVlibGallery();
       return;
     }
     const work = e.target.closest("[data-vlib-work]");
