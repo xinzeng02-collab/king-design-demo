@@ -41,6 +41,16 @@ export function resolveProvider(method, env = {}) {
       mchId: env.MOCK_MCH_ID, appId: env.MOCK_APP_ID, notifySecret: env.MOCK_NOTIFY_SECRET,
     });
   }
+  return resolveProviderByChannel(channel, env);
+}
+
+/** 回调/查单按「渠道」解析 Provider 实例。测试模式统一 Mock。 */
+export function resolveProviderByChannel(channel, env = {}) {
+  if (channel === "bank_transfer") return new BankTransferProvider(env);
+  if (channel === "manual_collect") return new ManualCollectProvider(env);
+  if (isTestMode(env)) {
+    return new MockProvider({ mchId: env.MOCK_MCH_ID, appId: env.MOCK_APP_ID, notifySecret: env.MOCK_NOTIFY_SECRET });
+  }
   switch (channel) {
     case "wechat": return new WeChatPayProvider(env);
     case "alipay": return new AlipayProvider(env);

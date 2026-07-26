@@ -61,10 +61,18 @@ npm run dev                  # http://localhost:8787/api/health
 - 前端只调 `/api/*`，永远拿不到私钥/证书/服务端密钥。
 - 权威写入(支付状态/退款/财务确认/交付/下载令牌)一律由 Workers 用 service_role 执行并写 audit_logs。
 
-## 下一阶段（第二阶段：支付测试全链路）
-1. 业务处理器：createPayment / status / notify / close / refund / bankTransfer / confirm / download
-2. 回调幂等 + 主动查单 + 退款状态机（接 MockProvider 打通）
-3. 支付页面 + 12 种支付状态 + 倒计时 + 按设备切换体验
-4. 对公转账与财务确认流程
-5. 受控交付（R2 短期签名链接）
-6. 完整自动化测试（覆盖伪造/越权/重复通知/退款后下载等）
+## 第二阶段已完成（支付测试全链路）
+- `src/core.js` 业务处理器：createPayment / getPaymentStatus / handleNotify / queryAndReconcile / closePayment / createRefund / completeRefund / submitBankTransfer / confirmBankTransfer / createDownloadUrl
+- `src/lib/repo.js` InMemoryRepo（测试）+ `src/lib/supabaseRepo.js` SupabaseRepo（生产，PostgREST）
+- `src/lib/r2.js` 受控下载短期签名（测试占位/生产 SigV4）
+- `src/index.js` 已把 `/api/*` 路由接到处理器
+- `studio-site/pay.html` 支付页 demo：订单信息 + 12 种状态 + 倒计时 + 按设备切换 + Apple Pay 探测隐藏 + TEST 标记
+- `test/payment.test.js` 自动化测试：`node --test` 共 **30 项全过**（含伪造/验签错/金额不符/重复通知幂等/越权/退款后下载/对公驳回/财务重复确认/落库失败回滚等）
+
+运行：`cd payment-backend && node --test`
+
+## 下一阶段（第三阶段：文件与交付权限 + 第四阶段：权限与 RLS）
+1. 接入 Cloudflare R2 测试 Bucket，落地真实 SigV4 短期签名
+2. Supabase Auth 实际接线 + memberships 角色数据
+3. RLS 策略联调 + 跨客户隔离端到端验证
+4. 把 studio-site 前端订单中心接到 `/api/*`（灰度切换，不破坏现有功能）
