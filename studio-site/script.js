@@ -3805,11 +3805,12 @@ function orderRowHtml(order, idx) {
   const deliver = orderDeliverStatus(order);
   const agreement = orderAgreementStatus(order);
   const expanded = orderExpandedId === order.id;
-  const thumbs = patterns.slice(0, 12).map((f) => {
+  // 只有展开的那一行才生成缩略图（base64 内联很重，折叠时不渲染，避免生成订单/刷新列表卡顿）
+  const thumbs = expanded ? patterns.slice(0, 12).map((f) => {
     const c = sourceCardByFile(f);
     const img = c?.dataset.imageData ? `background-image:url('${c.dataset.imageData}')` : "";
     return `<span class="order-flower" style="${img}" title="${escapeHtml(f)}"></span>`;
-  }).join("");
+  }).join("") : "";
   return `<tr class="order-row" data-order-row="${escapeHtml(order.id)}">
       <td class="order-cell-index">${idx + 1}</td>
       <td class="order-cell-number">${escapeHtml(order.id)}</td>
@@ -4118,6 +4119,9 @@ function applyPendingPaymentResult() {
   showToast(`订单 ${order.id} 支付成功，花型已加入你的花型库（待交付解锁）。`, "success");
 }
 window.addEventListener("focus", applyPendingPaymentResult);
+// 支付页是整页跳回，focus 不一定触发 —— 载入后主动结算一次（这才是入账的关键路径）
+document.addEventListener("DOMContentLoaded", () => setTimeout(applyPendingPaymentResult, 60));
+window.addEventListener("load", () => setTimeout(applyPendingPaymentResult, 120));
 
 /* ============ 侧边栏小圆点通知 ============ */
 function updateSidebarBadges() {
@@ -4325,7 +4329,7 @@ function agreementCustomerHtml(order) {
       <div><span>授权作品</span><strong>${orderPatternList(order).length} 款花型</strong></div>
       <div><span>订单金额</span><strong>¥${(order.price != null ? Number(order.price) : orderPatternList(order).length * 100).toFixed(2)}</strong></div>
     </div>
-    <div class="agr-file-row">
+    <div class="agr-file-plain">
       <div class="agr-file-meta">
         <div class="agr-file-n">${escapeHtml(order.agreementFileName || "KiNG_授权协议.pdf")}</div>
         <div class="agr-file-s">${escapeHtml((order.agreementFileName || "pdf").split(".").pop().toUpperCase())} 文件</div>
@@ -10852,20 +10856,23 @@ function renderVlibGallery() {
   const grid = document.querySelector("#vlibGallery");
   if (!grid) return;
   const cards = vlibFilteredCards();
-  // 该客户已购买过的花型不可再次购买（回购去重）
-  const owned = customerPurchasedFiles(viewerSession?.companyName || currentAccount.company || "");
+  // 该客户已买过的花型：只做提示，不禁止（非独家可重复售卖；是否停售由管理员决定）
+  const ownedByThisCustomer = customerPurchasedFiles(viewerSession?.companyName || currentAccount.company || "");
+  const lockedBySales = exclusivelySoldFiles();   // 管理员标记为独家/买断 -> 才真正下架
   grid.innerHTML = cards.length ? cards.map((card) => {
     const file = card.dataset.file;
-    const isOwned = owned.has(file);
+    const repeat = ownedByThisCustomer.has(file);
+    const soldOut = lockedBySales.has(file);
     const picked = libraryCart.has(file);
     const colors = Number(card.dataset.colors || 1);
     const check = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    return `<div class="vlib-card ${picked ? "picked" : ""} ${isOwned ? "owned" : ""}" data-vlib-work="${escapeHtml(file)}">
+    return `<div class="vlib-card ${picked ? "picked" : ""} ${soldOut ? "owned" : ""}" data-vlib-work="${escapeHtml(file)}">
       <div class="vlib-thumb" style="${card.dataset.imageData ? `background-image:url('${card.dataset.imageData}')` : ""}"></div>
-      ${isOwned
-        ? `<span class="vlib-owned-tag">已购买</span>`
-        : `<button class="vlib-add ${picked ? "added" : ""}" type="button" data-vlib-add="${escapeHtml(file)}" aria-label="${picked ? "已选，点击取消" : "加入选稿"}">${picked ? check : "+"}</button>`}
-      <div class="vlib-hover"><strong>${escapeHtml(file)}</strong><span>${isOwned ? "已购买，无需重复选择" : `${colors} 配色`}</span></div>
+      ${soldOut
+        ? `<span class="vlib-owned-tag">已独家售出</span>`
+        : `${repeat ? `<span class="vlib-owned-tag soft">已购买过</span>` : ""}
+           <button class="vlib-add ${picked ? "added" : ""}" type="button" data-vlib-add="${escapeHtml(file)}" aria-label="${picked ? "已选，点击取消" : "加入选稿"}">${picked ? check : "+"}</button>`}
+      <div class="vlib-hover"><strong>${escapeHtml(file)}</strong><span>${soldOut ? "已独家售出" : repeat ? `${colors} 配色 · 该客户已购买过` : `${colors} 配色`}</span></div>
     </div>`;
   }).join("") : `<p class="empty-state">未找到符合条件的花型。</p>`;
 }
@@ -11314,7 +11321,20 @@ function customerLockedFiles(company) {
   });
   return locked;
 }
-/** 客户已购买（含待解锁）的全部花型 —— 用于回购时禁止重复购买 */
+/** 被「独家 / 买断」售出的花型 —— 只有这种才真正下架；非独家可继续售卖。
+ *  授权类型由管理员在订单上设置，因此下架与否完全由管理员决定。 */
+function exclusivelySoldFiles() {
+  const set = new Set();
+  (studioOrders || []).forEach((o) => {
+    if (o.paymentStatus !== "已支付") return;
+    const lic = String(o.licenseType || "");
+    if (lic.includes("独家") && !lic.includes("非独家")) orderPatternList(o).forEach((f) => set.add(f));
+    else if (lic.includes("买断")) orderPatternList(o).forEach((f) => set.add(f));
+  });
+  return set;
+}
+
+/** 客户已购买（含待解锁）的全部花型 —— 仅用于提示"已购买过" */
 function customerPurchasedFiles(company) {
   const set = new Set(customerDeliveredFiles(company));
   customerLockedFiles(company).forEach((_id, f) => set.add(f));
@@ -11331,8 +11351,12 @@ function customerAgreementOrders(company) {
 }
 
 function renderCustomerAgreementSection(company) {
+  // 「待完成的交付协议」已统一移到「订单中心」处理，花型库只负责浏览花型。
   const section = document.querySelector("#customerAgreementSection");
   if (!section) return;
+  section.classList.add("hidden");
+  section.innerHTML = "";
+  if (true) return;
   const orders = customerAgreementOrders(company);
   section.classList.toggle("hidden", orders.length === 0);
   section.innerHTML = orders.length ? `
@@ -11393,9 +11417,76 @@ document.querySelector("#myLibraryGrid")?.addEventListener("click", (e) => {
   }
   const c = e.target.closest("[data-mylib-file]");
   if (!c) return;
-  const card = sourceCardByFile(c.dataset.mylibFile);
-  if (card) openLightbox(card);
+  openCustomerPatternViewer(c.dataset.mylibFile);
 });
+
+/* 客户端花型查看器：只有多配色浏览 + 下载原文件，不暴露任何内部信息 */
+function openCustomerPatternViewer(file) {
+  const card = sourceCardByFile(file);
+  if (!card) return;
+  let ov = document.getElementById("custPatternViewer");
+  if (!ov) {
+    const st = document.createElement("style");
+    st.textContent = `
+      #custPatternViewer{position:fixed;inset:0;z-index:1300;display:none}
+      #custPatternViewer.open{display:block}
+      #custPatternViewer .cpv-scrim{position:absolute;inset:0;background:rgba(20,18,16,.72)}
+      #custPatternViewer .cpv-box{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+        width:min(760px,92vw);max-height:88vh;overflow:auto;background:#fff;border-radius:18px;padding:24px}
+      #custPatternViewer .cpv-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+      #custPatternViewer .cpv-head h3{margin:0;font-size:18px}
+      #custPatternViewer .cpv-x{border:none;background:none;font-size:22px;color:#78716c;cursor:pointer}
+      #custPatternViewer .cpv-main{width:100%;aspect-ratio:4/3;border-radius:12px;background:#f5f4f2 center/cover no-repeat;border:1px solid #eae8e4}
+      #custPatternViewer .cpv-sub{font-size:13px;color:#57534e;margin:14px 0 8px}
+      #custPatternViewer .cpv-colors{display:flex;gap:10px;flex-wrap:wrap}
+      #custPatternViewer .cpv-c{width:64px;height:64px;border-radius:8px;background:#f5f4f2 center/cover no-repeat;
+        border:2px solid transparent;cursor:pointer}
+      #custPatternViewer .cpv-c.on{border-color:#1c1917}
+      #custPatternViewer .cpv-dl{margin-top:20px;width:100%;padding:14px;border:none;border-radius:10px;
+        background:#1c1917;color:#fff;font-size:15px;cursor:pointer}
+      #custPatternViewer .cpv-dl:hover{background:#000}`;
+    document.head.appendChild(st);
+    ov = document.createElement("div");
+    ov.id = "custPatternViewer";
+    ov.innerHTML = `<div class="cpv-scrim" data-cpv-close></div><div class="cpv-box" id="cpvBox"></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener("click", (e) => { if (e.target.closest("[data-cpv-close]")) { ov.classList.remove("open"); lockBodyScroll(false); } });
+  }
+  const name = card.querySelector(".work-head strong")?.textContent.trim() || file;
+  const main = card.dataset.imageData || "";
+  let palette = [];
+  try { palette = JSON.parse(card.dataset.paletteKeys || "[]"); } catch {}
+  const box = document.getElementById("cpvBox");
+  box.innerHTML = `<div class="cpv-head"><h3>${escapeHtml(name)}</h3><button class="cpv-x" data-cpv-close>×</button></div>
+    <div class="cpv-main" id="cpvMain" style="${main ? `background-image:url('${main}')` : ""}"></div>
+    ${palette.length > 1 ? `<div class="cpv-sub">配色（${palette.length}）</div>
+      <div class="cpv-colors" id="cpvColors">${palette.map((k, i) => `<div class="cpv-c ${i === 0 ? "on" : ""}" data-cpv-key="${escapeHtml(k)}"></div>`).join("")}</div>` : ""}
+    <button class="cpv-dl" data-cpv-download="${escapeHtml(file)}">下载原文件</button>`;
+  // 异步载入配色缩略图
+  palette.forEach(async (k, i) => {
+    try {
+      const src = await resolveImageSource(k);
+      const el = box.querySelector(`[data-cpv-key="${CSS.escape(k)}"]`);
+      if (el && src) el.style.backgroundImage = `url('${src}')`;
+      if (i === 0 && src) document.getElementById("cpvMain").style.backgroundImage = `url('${src}')`;
+    } catch {}
+  });
+  box.querySelector("#cpvColors")?.addEventListener("click", async (e) => {
+    const c = e.target.closest("[data-cpv-key]");
+    if (!c) return;
+    box.querySelectorAll(".cpv-c").forEach((x) => x.classList.toggle("on", x === c));
+    const src = await resolveImageSource(c.dataset.cpvKey);
+    if (src) document.getElementById("cpvMain").style.backgroundImage = `url('${src}')`;
+  });
+  box.querySelector("[data-cpv-download]")?.addEventListener("click", async () => {
+    const key = card.dataset.sourceFileKey || card.dataset.imageKey;
+    const fname = card.dataset.sourceFileName || `${name}.png`;
+    if (key) await downloadStoredFile(key, fname);
+    else showToast("原文件尚未上传，请联系工作室。", "warning");
+  });
+  ov.classList.add("open");
+  lockBodyScroll(true);
+}
 // 客户档案 · 历史订单 → 打开订单详情
 document.addEventListener("click", (event) => {
   const row = event.target.closest("[data-cc-open-order]");

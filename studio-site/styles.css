@@ -9447,13 +9447,14 @@ body.viewer-open { overflow: hidden; }
 .nav-item { position: relative; }
 .nav-dot { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 600; display: grid; place-items: center; line-height: 1; }
 
-/* 我的花型库：已购买待解锁 */
+/* 我的花型库：已购买待解锁 —— 45% 黑底遮罩 + 32px 白色矢量锁 */
 .mylib-card.locked { cursor: pointer; }
 .mylib-card .mylib-thumb { position: relative; }
-.mylib-lock { position: absolute; inset: 0; background: rgba(20,18,16,.52); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #fff; border-radius: inherit; }
-.mylib-lock small { font-size: 11px; letter-spacing: .02em; }
-.mylib-lock-ic { width: 26px; height: 26px; fill: none; stroke: #fff; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.mylib-lock { position: absolute; inset: 0; background: rgba(0,0,0,.45); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #fff; border-radius: inherit; }
+.mylib-lock small { font-size: 11px; letter-spacing: .04em; opacity: .92; }
+.mylib-lock-ic { width: 32px; height: 32px; fill: none; stroke: #fff; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .mylib-card.locked .mylib-info strong { color: var(--color-text-secondary); }
+.vlib-owned-tag.soft { background: rgba(255,255,255,.92); color: var(--color-text-secondary); border: 1px solid var(--line, #eae8e4); }
 
 /* 看稿库：已购买的花型不可重复选择 */
 .vlib-card.owned .vlib-thumb { filter: grayscale(.35) brightness(.94); }
@@ -9505,9 +9506,11 @@ body.viewer-open { overflow: hidden; }
 .agr-info > div { display: flex; justify-content: space-between; align-items: baseline; gap: 24px; font-size: 13px; color: var(--color-text-secondary); }
 .agr-info span { flex: none; letter-spacing: .02em; }
 .agr-info strong { color: var(--color-primary); font-weight: 500; text-align: right; word-break: break-all; }
-/* 协议文件行：文件名+类型靠左但不顶格，右侧只保留一个下载按钮 */
+/* 协议文件行：无外框，留足呼吸空间 */
+.agr-file-plain { display: flex; align-items: center; gap: 20px; padding: 4px 2px 18px; margin-bottom: 4px; }
+.agr-file-meta { flex: 1; min-width: 0; text-align: left; }
+/* 旧样式保留兼容 */
 .agr-file-row { display: flex; align-items: center; gap: 16px; border: 1px solid var(--line, #eae8e4); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
-.agr-file-meta { flex: 1; min-width: 0; text-align: left; padding-left: 2px; }
 .agr-file-n { font-size: 14px; font-weight: 500; color: var(--color-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agr-file-s { font-size: 12px; color: var(--color-text-tertiary, #a8a29e); margin-top: 2px; }
 .agr-view-btn { flex: none; padding: 8px 16px; border: 1px solid var(--color-border-strong, #d6d3d1); border-radius: 8px; background: #fff; font-size: 13px; cursor: pointer; color: var(--color-primary); }
