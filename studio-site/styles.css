@@ -9431,6 +9431,18 @@ body.viewer-open { overflow: hidden; }
 .order-expand-btn { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--color-text-secondary); font-size: 13px; cursor: pointer; display: grid; place-items: center; transition: transform .15s; }
 .order-expand-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
 .order-expand-btn.open { transform: translateY(-50%) rotate(180deg); }
+/* 客户档案 · 历史订单 */
+.cc-history { display: grid; gap: 8px; }
+.cc-hist-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; text-align: left; padding: 12px 14px; border: 1px solid var(--line, #eae8e4); border-radius: 10px; background: #fff; cursor: pointer; }
+.cc-hist-row:hover { border-color: var(--color-primary); }
+.cc-hist-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cc-hist-main strong { font-size: 13px; font-weight: 500; }
+.cc-hist-main small { font-size: 12px; color: var(--color-text-tertiary, #a8a29e); }
+.cc-hist-right { display: flex; align-items: center; gap: 8px; flex: none; }
+.cc-hist-right em { font-style: normal; font-weight: 600; font-size: 13px; }
+.cc-hist-tag { font-style: normal; font-size: 11px; padding: 2px 8px; border-radius: 6px; background: #faf9f8; border: 1px solid var(--line, #eae8e4); color: var(--color-text-secondary); }
+.cc-hist-tag.ok { background: #f0fdf4; border-color: #bbf7d0; color: #15803d; }
+
 /* 侧边栏小圆点通知 */
 .nav-item { position: relative; }
 .nav-dot { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 600; display: grid; place-items: center; line-height: 1; }

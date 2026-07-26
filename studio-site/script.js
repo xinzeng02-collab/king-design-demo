@@ -3118,6 +3118,36 @@ function buildCustomerCenter() {
   ];
 }
 
+/* ==== 客户档案的真实统计（全部由实际订单/看稿记录推导，不用种子假数据）==== */
+function customerOrdersOf(client) {
+  const nm = String(client?.name || "").trim().toLowerCase();
+  if (!nm) return [];
+  return (studioOrders || []).filter((o) => String(o.customer || "").trim().toLowerCase() === nm);
+}
+/** 实际购买（已支付）的花型总数 */
+function customerRealPurchased(client) {
+  const files = new Set();
+  customerOrdersOf(client).forEach((o) => {
+    if (o.paymentStatus === "已支付") orderPatternList(o).forEach((f) => files.add(f));
+  });
+  return files.size;
+}
+/** 最近一次购买时间：取最近一笔已支付订单的付款时间 */
+function customerRealLastBuy(client) {
+  const paid = customerOrdersOf(client)
+    .filter((o) => o.paymentStatus === "已支付")
+    .map((o) => o.paidAt || o.createdAt || "")
+    .filter(Boolean)
+    .sort();
+  return paid.length ? paid[paid.length - 1] : "—";
+}
+/** 最近一次看稿时间：以实际发起看稿的记录为准 */
+function customerRealLastReview(client) {
+  if (client?.lastReviewAt) return client.lastReviewAt;
+  const created = customerOrdersOf(client).map((o) => o.createdAt || "").filter(Boolean).sort();
+  return created.length ? created[created.length - 1] : "—";
+}
+
 // 最近合作：优先取该客户名下最近创建/开始的项目时间，没有则用档案里的记录。
 function customerLastCoop(client) {
   const related = (customProjects || []).filter((p) =>
@@ -3204,8 +3234,8 @@ function renderCustomerList() {
     <div class="cc-row ${client.id === activeCustomerCenterId ? "active" : ""}" data-customer-id="${escapeHtml(client.id)}" role="button" tabindex="0">
       <span class="cc-cell cc-cell-name">${escapeHtml(client.name)}</span>
       <span class="cc-cell cc-cell-contact">${escapeHtml(client.contact)}</span>
-      <span class="cc-cell cc-cell-count">${client.purchased} 款</span>
-      <span class="cc-cell cc-cell-date">${escapeHtml(client.lastBuy)}</span>
+      <span class="cc-cell cc-cell-count">${customerRealPurchased(client)} 款</span>
+      <span class="cc-cell cc-cell-date">${escapeHtml(customerRealLastBuy(client))}</span>
       <span class="cc-cell cc-cell-status"><em class="${customerStatusClass(client.status)}">${escapeHtml(client.status)}</em></span>
       <span class="cc-row-action">
         <button class="cc-row-menu-btn" type="button" data-customer-menu="${escapeHtml(client.id)}" aria-label="更多操作">⋯</button>
@@ -3267,7 +3297,21 @@ function renderCustomerDetail() {
 function renderCustomerTabBody(client) {
   if (activeCustomerTab === "overview") return customerOverviewHtml(client);
   if (activeCustomerTab === "works") return customerWorksHtml(client, 12);
-  if (activeCustomerTab === "history") return `<div class="cc-plain">共 ${client.purchased} 次购买记录，最近合作 ${escapeHtml(customerLastCoop(client))}。历史合作明细待接入订单数据。</div>`;
+  if (activeCustomerTab === "history") {
+    const list = customerOrdersOf(client).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    if (!list.length) return `<div class="cc-plain">该客户还没有订单记录。</div>`;
+    return `<div class="cc-history">${list.map((o) => {
+      const n = orderPatternList(o).length;
+      const paid = o.paymentStatus === "已支付";
+      const amount = (o.price != null ? Number(o.price) : n * 100).toFixed(2);
+      return `<button class="cc-hist-row" type="button" data-cc-open-order="${escapeHtml(o.id)}">
+        <span class="cc-hist-main"><strong>${escapeHtml(o.id)}</strong><small>${escapeHtml(o.createdAt || "—")} · ${n} 款花型</small></span>
+        <span class="cc-hist-right"><em>¥${amount}</em>
+        <i class="cc-hist-tag ${paid ? "ok" : ""}">${paid ? "已支付" : "未支付"}</i>
+        <i class="cc-hist-tag ${orderDeliverStatus(o) === "已交付" ? "ok" : ""}">${escapeHtml(orderDeliverStatus(o))}</i></span>
+      </button>`;
+    }).join("")}</div>`;
+  }
   if (activeCustomerTab === "profile") return customerProfileCardHtml(client);
   if (activeCustomerTab === "follow") return `<div class="cc-plain">暂无跟进记录。可在此登记客户沟通、报价与回访。</div>`;
   return "";
@@ -3318,7 +3362,8 @@ function customerProfileCardHtml(client) {
       <div><span>负责人</span><strong>${escapeHtml(client.owner)}</strong></div>
       <div><span>建立时间</span><strong>${escapeHtml(client.createdAt)}</strong></div>
       <div><span>最近合作</span><strong>${escapeHtml(customerLastCoop(client))}</strong></div>
-      <div><span>已购花型</span><strong>${client.purchased} 款</strong></div>
+      <div><span>已购花型</span><strong>${customerRealPurchased(client)} 款</strong></div>
+      <div><span>最近看稿</span><strong>${escapeHtml(customerRealLastReview(client))}</strong></div>
       <div><span>状态</span><strong>${escapeHtml(client.status)}</strong></div>
       <div><span>所在地区</span><strong>${escapeHtml(client.region)}</strong></div>
     </div></section></div>`;
@@ -10712,7 +10757,7 @@ function renderViewerCompanySuggest() {
   }
   box.innerHTML = matches.map((c) => `<button type="button" class="viewer-suggest-item" data-viewer-pick="${escapeHtml(c.id)}">
     <strong>${escapeHtml(c.name)}</strong>
-    <span>${escapeHtml(c.contact)} · 已购 ${c.purchased} 款 · 最近 ${escapeHtml(customerLastCoop(c))}</span>
+    <span>${escapeHtml(c.contact)} · 已购 ${customerRealPurchased(c)} 款 · 最近看稿 ${escapeHtml(customerRealLastReview(c))}</span>
   </button>`).join("");
   box.classList.remove("hidden");
 }
@@ -10748,6 +10793,12 @@ function startViewing() {
     createdAt: new Date().toISOString(),
     selectedPatternIds: [],
   };
+  // 记录真实「最近一次看稿时间」到客户档案
+  if (matched) {
+    matched.lastReviewAt = formatDateTime();
+    matched.reviewCount = (matched.reviewCount || 0) + 1;
+    saveStudioState();
+  }
   try { localStorage.setItem(VIEWER_SESSION_KEY, JSON.stringify(viewerSession)); } catch (e) {}
   document.querySelector("#viewerLoading")?.classList.remove("hidden");
   document.querySelector("#viewerPanel")?.classList.add("viewer-panel-exit");
@@ -11344,6 +11395,12 @@ document.querySelector("#myLibraryGrid")?.addEventListener("click", (e) => {
   if (!c) return;
   const card = sourceCardByFile(c.dataset.mylibFile);
   if (card) openLightbox(card);
+});
+// 客户档案 · 历史订单 → 打开订单详情
+document.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-cc-open-order]");
+  if (!row) return;
+  openOrderDetail(row.dataset.ccOpenOrder);
 });
 document.querySelector("#customerAgreementSection")?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-customer-sign-agreement]");

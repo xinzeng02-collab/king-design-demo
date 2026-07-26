@@ -27,8 +27,14 @@
     color:#b45309;font-size:12px;font-weight:600;letter-spacing:.06em;padding:5px 12px;border-radius:999px}
   .test-badge .dot{width:7px;height:7px;border-radius:50%;background:var(--amber)}
   /* 布局 */
-  .layout{max-width:1160px;margin:0 auto;padding:36px 40px 72px;
-    display:grid;grid-template-columns:1.35fr 1fr;gap:32px;align-items:start}
+  /* 左右两栏各自独立滚动：在哪一栏滚动只影响那一栏 */
+  .layout{max-width:1160px;margin:0 auto;padding:28px 40px;height:calc(100vh - 64px);
+    display:grid;grid-template-columns:1.35fr 1fr;gap:32px;align-items:start;overflow:hidden}
+  .layout > .left,.layout > .right{height:100%;overflow-y:auto;overscroll-behavior:contain;
+    padding-right:6px;scrollbar-width:thin}
+  .layout > .left::-webkit-scrollbar,.layout > .right::-webkit-scrollbar{width:8px}
+  .layout > .left::-webkit-scrollbar-thumb,.layout > .right::-webkit-scrollbar-thumb{background:#e2e0dc;border-radius:8px}
+  .layout > .left::-webkit-scrollbar-thumb:hover,.layout > .right::-webkit-scrollbar-thumb:hover{background:#d0cdc8}
   .back{display:inline-flex;align-items:center;gap:8px;color:var(--ink-2);font-size:14px;
     text-decoration:none;margin-bottom:18px;cursor:pointer}
   .back:hover{color:var(--ink)}
@@ -62,7 +68,8 @@
   .method.sel .check{display:grid} .method.sel .arrow{display:none}
   .method .check svg{width:12px;height:12px;fill:#fff}
   /* 右栏摘要 */
-  .right{position:sticky;top:96px}
+  .right{padding-bottom:20px}
+  .left{padding-bottom:20px}
   .sum-title{font-size:15px;font-weight:600;margin:0 0 16px}
   .sum-row{display:flex;justify-content:space-between;font-size:14px;color:var(--ink-2);padding:6px 0}
   .sum-div{border-top:1px dashed var(--line-2);margin:12px 0}
@@ -155,8 +162,6 @@
     </div>
   </div>
 
-  <div class="demo"><details><summary>▸ TEST 状态演示（切换支付页 12 种状态）</summary><div class="btns" id="stateBtns"></div></details></div>
-  <div class="foot">如有疑问，请<a>联系客服</a>或查看<a>帮助中心</a>　·　🧪 测试模式，不产生真实扣款</div>
 
 <script>
 // ---------- 品牌图标（近似，内部工具用） ----------
@@ -314,7 +319,7 @@ function setState(k){
   else renderPanel();
 }
 const sb=document.getElementById("stateBtns");
-Object.entries(STATES).forEach(([k,v])=>{const b=document.createElement("button");b.textContent=v;b.onclick=()=>setState(k);sb.appendChild(b);});
+if(sb){Object.entries(STATES).forEach(([k,v])=>{const b=document.createElement("button");b.textContent=v;b.onclick=()=>setState(k);sb.appendChild(b);});}
 
 // ---------- 倒计时 ----------
 let orderRemain=770;
