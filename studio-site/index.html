@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>KiNG DESiGN 管理系统</title>
-    <link rel="stylesheet" href="./styles.css?v=20260724-lifecycle-v7" />
+    <link rel="stylesheet" href="./styles.css?v=20260724-orders-center-v8" />
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -129,6 +129,7 @@
           <button class="nav-item" data-view="library" data-roles="管理员,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h7l2-2h8v13.5h-17z"></path></svg><span class="nav-label">客户中心</span></button>
           <button class="nav-item" data-view="orders" data-roles="管理员,设计师,手绘师,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1 12H6zM8 8a4 4 0 0 1 8 0M9 12v2M15 12v2"></path></svg><span class="nav-label">订单中心</span></button>
           <button class="nav-item" data-view="myLibrary" data-roles="客户"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="1.5"></rect><circle cx="9" cy="10" r="1.5"></circle><path d="m6.5 17 4-4 2.8 2.5 2.2-2 2 3.5"></path></svg><span class="nav-label">我的花型库</span></button>
+          <button class="nav-item" data-view="myOrders" data-roles="客户"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16l-3-2-3 2-3-2-3 2V4z"></path><path d="M9 9h6M9 13h4"></path></svg><span class="nav-label">订单中心</span></button>
         </nav>
 
         <nav class="nav nav-bottom" aria-label="回收站导航">
@@ -618,6 +619,31 @@
           <div class="my-library-grid" id="myLibraryGrid"></div>
         </section>
 
+        <section class="view" id="myOrders">
+          <div class="section-head">
+            <div>
+              <h2>订单中心</h2>
+              <p>这里是你与工作室的全部订单：签约、支付、交付与历史记录。</p>
+            </div>
+          </div>
+          <div class="mo-toolbar">
+            <div class="mo-tabs" id="moTabs">
+              <button class="mo-tab on" data-mo-filter="all" type="button">全部订单</button>
+              <button class="mo-tab" data-mo-filter="signing" type="button">待签约</button>
+              <button class="mo-tab" data-mo-filter="reviewing" type="button">待审核</button>
+              <button class="mo-tab" data-mo-filter="paying" type="button">待支付</button>
+              <button class="mo-tab" data-mo-filter="delivering" type="button">待交付</button>
+              <button class="mo-tab" data-mo-filter="done" type="button">已完成</button>
+              <button class="mo-tab" data-mo-filter="cancelled" type="button">已取消</button>
+            </div>
+            <div class="mo-search">
+              <input id="moSearch" type="search" placeholder="搜索订单编号或花型名称" />
+            </div>
+          </div>
+          <div class="mo-list" id="moList"></div>
+          <div class="mo-more-wrap"><button class="mo-more hidden" id="moLoadMore" type="button">加载更多订单</button></div>
+        </section>
+
         <section class="view" id="recycle">
           <div class="section-head">
             <div>
@@ -988,10 +1014,6 @@
         <div class="platform-dialog-body">
           <p id="deliveryAgreementMessage"></p>
           <div class="delivery-agreement-summary" id="deliveryAgreementSummary"></div>
-          <label class="delivery-agreement-consent hidden" id="deliveryAgreementConsent">
-            <input id="deliveryAgreementCheck" type="checkbox" />
-            <span>我已阅读并同意以上作品交付与授权条款。</span>
-          </label>
         </div>
         <footer>
           <button class="text-dialog-button" id="deliveryAgreementCancel" type="button">取消</button>
@@ -1441,6 +1463,6 @@
     <input type="file" id="projectDetailFileInput" accept=".psd,.ai,.jpg,.jpeg,.png,.pdf,.doc,.docx,.ppt,.pptx,application/postscript,image/jpeg,image/png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple style="display:none" />
 
     <script src="./assets/king-cases/manifest.js?v=20260724-image-fix"></script>
-    <script src="./script.js?v=20260724-lifecycle-v7"></script>
+    <script src="./script.js?v=20260724-orders-center-v8"></script>
   </body>
 </html>
