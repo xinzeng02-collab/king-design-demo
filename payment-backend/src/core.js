@@ -48,7 +48,10 @@ async function creditPaid(repo, order, payment) {
     await repo.insertAudit({ action: "paid_on_cancelled_order", target_type: "payment", target_id: p.id });
   }
   if (o.payment_status !== "paid" && canPaymentTransition(o.payment_status, "paid")) {
-    await repo.updateOrder(o.id, { payment_status: "paid" });
+    // 付款成功：交付若已准备待付款(锁定)则自动解锁为可下载
+    const patch = { payment_status: "paid" };
+    if (o.delivery_status === "prepared_locked") patch.delivery_status = "ready";
+    await repo.updateOrder(o.id, patch);
   }
   await repo.updatePayment(p.id, { status: "paid", paid_at: Date.now() });
   await repo.insertAudit({ action: "payment_paid", target_type: "payment", target_id: p.id, after: { status: "paid" } });
