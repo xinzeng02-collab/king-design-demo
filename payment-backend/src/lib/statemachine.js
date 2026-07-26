@@ -40,7 +40,7 @@ const AGREEMENT_TRANSITIONS = {
   awaiting_signature: ["signed_returned", "agreement_uploaded"],
   signed_returned: ["reviewing"],
   reviewing: ["signed", "rejected"],
-  rejected: ["awaiting_signature", "agreement_uploaded"], // 驳回 -> 客户重新上传签署件
+  rejected: ["awaiting_signature", "agreement_uploaded", "signed_returned"], // 驳回 -> 客户重新上传签署件(直接再回传)
   signed: [],
 };
 

@@ -4,6 +4,7 @@ import { authenticate } from "./lib/auth.js";
 import { channelAvailability } from "./providers/config.js";
 import { SupabaseRepo } from "./lib/supabaseRepo.js";
 import * as core from "./core.js";
+import * as sign from "./signing.js";
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
@@ -83,6 +84,36 @@ export default {
       if (seg[1] === "deliveries" && seg[3] === "create-download-url" && method === "POST") {
         return json(await core.createDownloadUrl(repo, env, { orderId: body.orderId, fileId: seg[2] }, actor));
       }
+
+      // ---- 看稿 ----
+      if (pathname === "/api/reviews/start" && method === "POST")
+        return json(await sign.startReview(repo, env, body, actor));
+      if (seg[1] === "reviews" && seg[3] === "items" && method === "POST")
+        return json(await sign.addReviewItem(repo, env, { sessionId: seg[2], ...body }, actor));
+      if (seg[1] === "reviews" && seg[3] === "items" && method === "DELETE")
+        return json(await sign.removeReviewItem(repo, env, { sessionId: seg[2], patternId: seg[4] }, actor));
+      if (seg[1] === "reviews" && seg[3] === "complete" && method === "POST")
+        return json(await sign.completeReview(repo, env, { sessionId: seg[2] }, actor));
+      if (seg[1] === "reviews" && seg[3] === "return" && method === "POST")
+        return json(await sign.returnReview(repo, env, { sessionId: seg[2] }, actor));
+      if (seg[1] === "reviews" && seg[3] === "create-order" && method === "POST")
+        return json(await sign.createOrderFromReview(repo, env, { sessionId: seg[2], ...body }, actor));
+
+      // ---- 签约 ----
+      if (seg[1] === "orders" && seg[3] === "agreement" && seg[4] === "upload" && method === "POST")
+        return json(await sign.uploadAgreement(repo, env, { orderId: seg[2], ...body }, actor));
+      if (seg[1] === "orders" && seg[3] === "agreement" && seg[4] === "initiate" && method === "POST")
+        return json(await sign.initiateSigning(repo, env, { orderId: seg[2], ...body }, actor));
+      if (seg[1] === "orders" && seg[3] === "agreement" && seg[4] === "submit-signed" && method === "POST")
+        return json(await sign.submitSignedFile(repo, env, { orderId: seg[2], ...body }, actor));
+      if (seg[1] === "orders" && seg[3] === "agreement" && seg[4] === "review" && method === "POST")
+        return json(await sign.reviewSignedFile(repo, env, { orderId: seg[2], ...body }, actor));
+
+      // ---- 交付准备 / 订单完成 ----
+      if (seg[1] === "orders" && seg[3] === "delivery" && seg[4] === "prepare" && method === "POST")
+        return json(await sign.prepareDelivery(repo, env, { orderId: seg[2], ...body }, actor));
+      if (seg[1] === "orders" && seg[3] === "complete" && method === "POST")
+        return json(await sign.completeOrder(repo, env, { orderId: seg[2] }, actor));
 
       return json({ error: "NOT_FOUND" }, 404);
     } catch (e) {

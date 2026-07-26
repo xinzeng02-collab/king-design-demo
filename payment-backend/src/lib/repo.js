@@ -10,6 +10,9 @@ export class InMemoryRepo {
   constructor() {
     this.orders = new Map();
     this.orderItems = [];
+    this.reviewSessions = new Map();
+    this.reviewItems = [];
+    this.agreements = new Map();
     this.payments = new Map();
     this.paymentEvents = [];
     this.paymentEventKeys = new Set();   // `${provider}:${eventId}` 幂等去重
@@ -20,13 +23,33 @@ export class InMemoryRepo {
     this.auditLogs = [];
   }
 
+  // ---- 看稿会话 ----
+  createReviewSession(s) { const row = { id: uid("rev"), status: "in_progress", created_at: Date.now(), ...s }; this.reviewSessions.set(row.id, row); return row; }
+  getReviewSession(id) { return this.reviewSessions.get(id) || null; }
+  updateReviewSession(id, patch) { const s = this.reviewSessions.get(id); if (!s) throw new Error("REVIEW_SESSION_NOT_FOUND"); Object.assign(s, patch); return s; }
+  addReviewItem(it) { const row = { id: uid("ri"), added_at: Date.now(), ...it }; this.reviewItems.push(row); return row; }
+  removeReviewItem(sessionId, patternId) { this.reviewItems = this.reviewItems.filter((r) => !(r.review_session_id === sessionId && r.pattern_id === patternId)); return true; }
+  listReviewItems(sessionId) { return this.reviewItems.filter((r) => r.review_session_id === sessionId); }
+
+  // ---- 签约 ----
+  createAgreement(a) { const row = { id: uid("agr"), version: 1, status: "no_agreement", created_at: Date.now(), ...a }; this.agreements.set(row.id, row); return row; }
+  getAgreement(id) { return this.agreements.get(id) || null; }
+  getAgreementByOrder(orderId) { return [...this.agreements.values()].filter((a) => a.order_id === orderId).sort((a, b) => b.version - a.version)[0] || null; }
+  updateAgreement(id, patch) { const a = this.agreements.get(id); if (!a) throw new Error("AGREEMENT_NOT_FOUND"); Object.assign(a, patch); return a; }
+
+  // ---- 订单明细 ----
+  createOrderItem(it) { const row = { id: uid("oi"), ...it }; this.orderItems.push(row); return row; }
+  listOrderItems(orderId) { return this.orderItems.filter((i) => i.order_id === orderId); }
+
   // ---- 订单 ----
+  createOrder(o) { const row = { id: o.id || uid("ord"), created_at: Date.now(), ...o }; this.orders.set(row.id, row); return row; }
   seedOrder(o) { const row = { id: o.id || uid("ord"), ...o }; this.orders.set(row.id, row); return row; }
   getOrder(id) { return this.orders.get(id) || null; }
   getOrderByNumber(n) { for (const o of this.orders.values()) if (o.order_number === n) return o; return null; }
   updateOrder(id, patch) { const o = this.orders.get(id); if (!o) throw new Error("ORDER_NOT_FOUND"); Object.assign(o, patch); return o; }
 
   seedDeliveryFile(f) { const row = { id: f.id || uid("df"), version: 1, ...f }; this.deliveryFiles.set(row.id, row); return row; }
+  createDeliveryFile(f) { return this.seedDeliveryFile(f); }
   getDeliveryFile(id) { return this.deliveryFiles.get(id) || null; }
   listDeliveryFiles(orderId) { return [...this.deliveryFiles.values()].filter((f) => f.order_id === orderId); }
 

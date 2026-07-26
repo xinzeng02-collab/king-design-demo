@@ -60,4 +60,24 @@ export class SupabaseRepo {
 
   // 成员/角色
   getMembership(userId) { return this._one(`memberships?user_id=eq.${userId}&limit=1`); }
+
+  // 看稿会话
+  async createReviewSession(s) { const x = await this._req(`review_sessions`, { method: "POST", body: s, prefer: "return=representation" }); return Array.isArray(x) ? x[0] : x; }
+  getReviewSession(id) { return this._one(`review_sessions?id=eq.${id}&limit=1`); }
+  async updateReviewSession(id, patch) { return this._req(`review_sessions?id=eq.${id}`, { method: "PATCH", body: patch }); }
+  async addReviewItem(it) { const x = await this._req(`review_items`, { method: "POST", body: it, prefer: "return=representation,resolution=merge-duplicates" }); return Array.isArray(x) ? x[0] : x; }
+  async removeReviewItem(sessionId, patternId) { return this._req(`review_items?review_session_id=eq.${sessionId}&pattern_id=eq.${encodeURIComponent(patternId)}`, { method: "DELETE" }); }
+  async listReviewItems(sessionId) { return (await this._req(`review_items?review_session_id=eq.${sessionId}`)) || []; }
+
+  // 签约
+  async createAgreement(a) { const x = await this._req(`agreements`, { method: "POST", body: a, prefer: "return=representation" }); return Array.isArray(x) ? x[0] : x; }
+  getAgreement(id) { return this._one(`agreements?id=eq.${id}&limit=1`); }
+  getAgreementByOrder(orderId) { return this._one(`agreements?order_id=eq.${orderId}&order=version.desc&limit=1`); }
+  async updateAgreement(id, patch) { return this._req(`agreements?id=eq.${id}`, { method: "PATCH", body: patch }); }
+
+  // 订单明细 / 订单
+  async createOrder(o) { const x = await this._req(`orders`, { method: "POST", body: o, prefer: "return=representation" }); return Array.isArray(x) ? x[0] : x; }
+  async createOrderItem(it) { const x = await this._req(`order_items`, { method: "POST", body: it, prefer: "return=representation" }); return Array.isArray(x) ? x[0] : x; }
+  async listOrderItems(orderId) { return (await this._req(`order_items?order_id=eq.${orderId}`)) || []; }
+  async createDeliveryFile(f) { const x = await this._req(`delivery_files`, { method: "POST", body: f, prefer: "return=representation" }); return Array.isArray(x) ? x[0] : x; }
 }

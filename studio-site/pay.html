@@ -3,203 +3,286 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>KiNG DESiGN · 订单支付（TEST）</title>
+<title>KiNG DESiGN · 确认并支付</title>
 <style>
   :root{
-    --color-primary:#111111; --color-bg:#f5f5f4; --color-surface:#ffffff;
-    --color-line:#e7e5e4; --color-sub:#78716c; --color-ok:#16a34a; --color-warn:#d97706;
-    --color-err:#dc2626; --color-processing:#2563eb;
-    --radius-sm:4px; --radius-md:8px; --radius-lg:12px; --radius-xl:16px;
-    --font:"PingFang SC","Helvetica Neue",-apple-system,"Microsoft YaHei",sans-serif;
+    --ink:#1c1917; --ink-2:#57534e; --ink-3:#a8a29e; --bg:#fafaf9; --surface:#ffffff;
+    --line:#eae8e4; --line-2:#e2e0dc; --err:#e02424; --amber:#f59e0b;
+    --wechat:#22ac38; --alipay:#1677ff; --unionpay:#e60012; --bank:#78716c;
+    --r-sm:6px; --r-md:10px; --r-lg:14px; --r-xl:18px;
+    --font:"PingFang SC","Helvetica Neue",-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--color-bg);font-family:var(--font);color:var(--color-primary);
-    -webkit-font-smoothing:antialiased;display:flex;justify-content:center;padding:24px 16px 60px}
-  .wrap{width:100%;max-width:520px}
-  .test-banner{background:#111;color:#fde68a;border-radius:var(--radius-md);padding:8px 14px;
-    font-size:12px;letter-spacing:.04em;margin-bottom:16px;display:flex;gap:8px;align-items:center}
-  .test-banner b{color:#fbbf24}
-  .card{background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-xl);
-    padding:20px;margin-bottom:16px}
-  .order-head{display:flex;gap:14px;align-items:center}
-  .thumb{width:64px;height:64px;border-radius:var(--radius-md);object-fit:cover;background:#e7e5e4;flex:none}
-  .order-head h2{font-size:15px;margin:0 0 4px}
-  .order-head .code{font-size:12px;color:var(--color-sub)}
-  .lic{display:inline-block;margin-top:6px;font-size:11px;padding:2px 8px;border-radius:var(--radius-sm);
-    background:#f5f5f4;border:1px solid var(--color-line);color:#57534e}
-  .rows{margin-top:16px;border-top:1px dashed var(--color-line);padding-top:12px}
-  .row{display:flex;justify-content:space-between;font-size:13px;padding:5px 0;color:#57534e}
-  .row.total{font-size:16px;color:var(--color-primary);font-weight:600;padding-top:10px}
-  .row.total .amt{color:var(--color-err)}
-  .status-line{display:flex;align-items:center;justify-content:space-between;margin-top:6px}
-  .badge{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid}
-  .countdown{font-size:12px;color:var(--color-sub);font-variant-numeric:tabular-nums}
-  .methods h3{font-size:13px;color:var(--color-sub);margin:0 0 10px;font-weight:500}
-  .method{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--color-line);
-    border-radius:var(--radius-md);margin-bottom:10px;cursor:pointer;transition:.15s;background:#fff}
-  .method:hover{border-color:#111}
-  .method.sel{border-color:#111;box-shadow:0 0 0 1px #111 inset}
-  .method.disabled{opacity:.45;cursor:not-allowed;background:#fafaf9}
-  .method .ico{width:28px;height:28px;border-radius:6px;flex:none;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700}
-  .method .name{font-size:14px;flex:1}
-  .method .tag{font-size:11px;color:var(--color-sub)}
-  .pay-btn{width:100%;padding:14px;border:none;border-radius:var(--radius-md);background:var(--color-primary);
-    color:#fff;font-size:15px;cursor:pointer;margin-top:6px}
-  .pay-btn:disabled{background:#a8a29e;cursor:not-allowed}
-  .panel{margin-top:16px;text-align:center;display:none}
-  .panel.show{display:block}
-  .qr{width:180px;height:180px;margin:8px auto;border:1px solid var(--color-line);border-radius:var(--radius-md);
-    display:grid;place-items:center;color:var(--color-sub);font-size:12px;background:#fafaf9}
-  .result{padding:24px 12px;text-align:center}
-  .result .icon{font-size:40px}
-  .result .msg{font-size:16px;margin-top:8px}
-  .result .sub{font-size:13px;color:var(--color-sub);margin-top:6px}
-  .demo{margin-top:22px;border-top:1px dashed var(--color-line);padding-top:14px}
-  .demo p{font-size:11px;color:var(--color-sub);margin:0 0 8px}
-  .demo .btns{display:flex;flex-wrap:wrap;gap:6px}
-  .demo button{font-size:11px;padding:5px 9px;border:1px solid var(--color-line);border-radius:var(--radius-sm);
-    background:#fff;cursor:pointer}
-  .demo button:hover{border-color:#111}
+  html,body{margin:0}
+  body{background:var(--bg);font-family:var(--font);color:var(--ink);-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  /* 顶栏 */
+  .topbar{height:64px;background:var(--surface);border-bottom:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;padding:0 40px;position:sticky;top:0;z-index:10}
+  .brand{display:flex;align-items:center;gap:14px}
+  .brand .logo{font-weight:800;letter-spacing:.02em;font-size:19px}
+  .brand .sep{width:1px;height:18px;background:var(--line-2)}
+  .brand .sub{color:var(--ink-2);font-size:14px}
+  .test-badge{display:inline-flex;align-items:center;gap:7px;background:#fffdf5;border:1px solid #fde9b0;
+    color:#b45309;font-size:12px;font-weight:600;letter-spacing:.06em;padding:5px 12px;border-radius:999px}
+  .test-badge .dot{width:7px;height:7px;border-radius:50%;background:var(--amber)}
+  /* 布局 */
+  .layout{max-width:1160px;margin:0 auto;padding:36px 40px 72px;
+    display:grid;grid-template-columns:1.35fr 1fr;gap:32px;align-items:start}
+  .back{display:inline-flex;align-items:center;gap:8px;color:var(--ink-2);font-size:14px;
+    text-decoration:none;margin-bottom:18px;cursor:pointer}
+  .back:hover{color:var(--ink)}
+  h1{font-size:34px;font-weight:800;margin:0 0 10px;letter-spacing:-.01em}
+  .lead{color:var(--ink-2);font-size:15px;margin:0 0 26px}
+  /* 卡片 */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-xl);padding:22px 24px}
+  .card + .card{margin-top:18px}
+  /* 订单卡 */
+  .order{display:flex;gap:18px;align-items:center}
+  .order .thumb{width:96px;height:96px;border-radius:var(--r-md);object-fit:cover;flex:none;
+    background:linear-gradient(135deg,#efe9df,#e6ded0);border:1px solid var(--line)}
+  .order h3{margin:0 0 8px;font-size:18px}
+  .order .meta{font-size:13px;color:var(--ink-2);line-height:1.9}
+  .order .meta b{color:var(--ink);font-weight:500}
+  .chip{display:inline-block;margin-top:10px;font-size:12px;padding:3px 10px;border-radius:var(--r-sm);
+    background:#f5f4f2;border:1px solid var(--line-2);color:var(--ink-2)}
+  /* 支付方式 */
+  .sec-title{font-size:15px;font-weight:600;margin:28px 0 14px}
+  .method{display:flex;align-items:center;gap:14px;padding:16px 18px;background:var(--surface);
+    border:1.5px solid var(--line-2);border-radius:var(--r-lg);margin-bottom:12px;cursor:pointer;transition:.15s}
+  .method:hover{border-color:var(--ink-3)}
+  .method.sel{border-color:var(--ink);box-shadow:0 1px 0 var(--ink) inset,0 0 0 1px var(--ink) inset}
+  .method.disabled{opacity:.5;cursor:not-allowed;background:#faf9f8}
+  .method .ico{width:34px;height:34px;border-radius:9px;flex:none;display:grid;place-items:center}
+  .method .ico svg{width:22px;height:22px}
+  .method .name{flex:1;font-size:15px;font-weight:500}
+  .method .muted{font-size:12px;color:var(--ink-3);font-weight:400;margin-left:6px}
+  .method .arrow{color:var(--ink-3);font-size:18px}
+  .method .check{width:22px;height:22px;border-radius:50%;background:var(--ink);display:none;place-items:center}
+  .method.sel .check{display:grid} .method.sel .arrow{display:none}
+  .method .check svg{width:12px;height:12px;fill:#fff}
+  /* 右栏摘要 */
+  .right{position:sticky;top:96px}
+  .sum-title{font-size:15px;font-weight:600;margin:0 0 16px}
+  .sum-row{display:flex;justify-content:space-between;font-size:14px;color:var(--ink-2);padding:6px 0}
+  .sum-div{border-top:1px dashed var(--line-2);margin:12px 0}
+  .sum-total{display:flex;justify-content:space-between;align-items:baseline}
+  .sum-total .l{font-size:16px;font-weight:600}
+  .sum-total .v{font-size:26px;font-weight:800;color:var(--err)}
+  .timer{display:flex;align-items:center;gap:8px;color:var(--ink-2);font-size:13px;margin-top:14px}
+  .timer b{color:var(--err);font-variant-numeric:tabular-nums;font-weight:600}
+  .timer svg{width:15px;height:15px;stroke:var(--ink-3);fill:none}
+  /* 动态支付面板 */
+  .pay-panel .ph{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .pay-panel .ph .ico{width:26px;height:26px;border-radius:7px;display:grid;place-items:center}
+  .pay-panel .ph .ico svg{width:17px;height:17px}
+  .pay-panel .ph h4{margin:0;font-size:16px}
+  .pay-panel .phsub{color:var(--ink-2);font-size:13px;margin:0 0 6px}
+  .qr-wrap{display:flex;flex-direction:column;align-items:center;padding:6px 0 2px}
+  .qr-box{position:relative;width:196px;height:196px;padding:12px;background:#fff;border:1px solid var(--line);
+    border-radius:var(--r-md);margin:10px 0 8px}
+  .qr-box canvas{width:100%;height:100%;display:block}
+  .qr-logo{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:38px;height:38px;
+    border-radius:9px;display:grid;place-items:center;border:3px solid #fff}
+  .qr-logo svg{width:22px;height:22px}
+  .qr-valid{font-size:13px;color:var(--ink-2)}
+  .qr-valid b{color:var(--err);font-variant-numeric:tabular-nums}
+  .refresh{display:inline-flex;align-items:center;gap:6px;color:var(--ink-2);font-size:13px;
+    background:none;border:none;cursor:pointer;margin-top:8px}
+  .refresh:hover{color:var(--ink)} .refresh svg{width:14px;height:14px;stroke:currentColor;fill:none}
+  .btn-dark{width:100%;padding:14px;border:none;border-radius:var(--r-md);background:var(--ink);color:#fff;
+    font-size:15px;font-weight:500;cursor:pointer;margin-top:18px}
+  .btn-dark:hover{background:#000}
+  /* 对公转账 */
+  .bank-row{display:flex;justify-content:space-between;font-size:14px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .bank-row .k{color:var(--ink-2)} .bank-row .v{font-weight:500}
+  .bank-note{font-size:13px;color:var(--ink-2);margin:16px 0 12px;line-height:1.6}
+  .drop{border:1.5px dashed var(--line-2);border-radius:var(--r-md);padding:26px;text-align:center;cursor:pointer}
+  .drop:hover{border-color:var(--ink-3);background:#fafaf9}
+  .drop .up{font-size:22px;color:var(--ink-2)} .drop .t{font-size:14px;margin:8px 0 4px}
+  .drop .h{font-size:12px;color:var(--ink-3)}
+  /* 结果态 */
+  .result{text-align:center;padding:14px 4px}
+  .result .ic{font-size:40px} .result .msg{font-size:17px;font-weight:600;margin-top:8px}
+  .result .sb{font-size:13px;color:var(--ink-2);margin-top:6px}
+  /* 页脚 + 演示 */
+  .foot{max-width:1160px;margin:0 auto;padding:0 40px 40px;text-align:center;color:var(--ink-3);font-size:13px}
+  .foot a{color:var(--ink-2);text-decoration:underline;text-underline-offset:2px}
+  .demo{max-width:1160px;margin:8px auto 0;padding:14px 40px 0}
+  .demo details{border-top:1px dashed var(--line-2);padding-top:12px}
+  .demo summary{font-size:12px;color:var(--ink-3);cursor:pointer}
+  .demo .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .demo button{font-size:11px;padding:5px 9px;border:1px solid var(--line-2);border-radius:var(--r-sm);background:#fff;cursor:pointer}
+  .demo button:hover{border-color:var(--ink)}
+  @media(max-width:880px){.layout{grid-template-columns:1fr;padding:24px 18px 60px}.right{position:static}
+    .topbar{padding:0 18px}h1{font-size:27px}}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="test-banner">🧪 <b>TEST 测试模式</b>｜此页面为模拟支付演示，不产生真实扣款。上线接入真实商户后自动切换。</div>
+  <div class="topbar">
+    <div class="brand"><span class="logo">KiNG DESiGN</span><span class="sep"></span><span class="sub">客户中心</span></div>
+    <span class="test-badge"><span class="dot"></span>TEST MODE</span>
+  </div>
 
-  <!-- 订单信息 -->
-  <div class="card">
-    <div class="order-head">
-      <div class="thumb" id="thumb"></div>
-      <div>
-        <h2 id="pName">缠枝莲团花</h2>
-        <div class="code">花型编号 <span id="pCode">KP-2026-0148</span></div>
-        <div class="code">订单编号 <span id="oNo">DD-20260726-0007</span></div>
-        <span class="lic" id="lic">授权类型：非独家</span>
+  <div class="layout">
+    <!-- 左：订单 + 支付方式 -->
+    <div class="left">
+      <a class="back">← 返回订单列表</a>
+      <h1>确认并支付</h1>
+      <p class="lead">请选择支付方式并在有效时间内完成付款，以确保订单顺利处理。</p>
+
+      <div class="card order">
+        <div class="thumb" id="thumb"></div>
+        <div>
+          <h3 id="pName">缠枝莲团花</h3>
+          <div class="meta">
+            花型编号　<b id="pCode">KP-2026-0148</b><br>
+            订单编号　<b id="oNo">DD-20260726-0007</b>
+          </div>
+          <span class="chip" id="lic">非独家授权</span>
+        </div>
       </div>
+
+      <div class="sec-title">选择支付方式</div>
+      <div id="methodList"></div>
     </div>
-    <div class="rows">
-      <div class="row"><span>商品金额</span><span id="subtotal">¥1,200.00</span></div>
-      <div class="row"><span>优惠金额</span><span id="discount">−¥200.00</span></div>
-      <div class="row total"><span>应付金额</span><span class="amt" id="payable">¥1,000.00</span></div>
-    </div>
-    <div class="rows">
-      <div class="status-line">
-        <span class="badge" id="statusBadge">待支付</span>
-        <span class="countdown" id="countdown">支付剩余 14:59</span>
+
+    <!-- 右：摘要 + 动态面板 -->
+    <div class="right">
+      <div class="card">
+        <div class="sum-title">订单摘要</div>
+        <div class="sum-row"><span>商品金额</span><span id="subtotal">¥1,200.00</span></div>
+        <div class="sum-row"><span>优惠金额</span><span id="discount">−¥200.00</span></div>
+        <div class="sum-div"></div>
+        <div class="sum-total"><span class="l">应付金额</span><span class="v" id="payable">¥1,000.00</span></div>
+        <div class="timer">
+          <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>
+          支付剩余 <b id="orderCd">12:50</b>
+        </div>
       </div>
+
+      <div class="card pay-panel" id="panel"></div>
     </div>
   </div>
 
-  <!-- 支付方式（统一组件） -->
-  <div class="card methods" id="methodsCard">
-    <h3>选择支付方式（<span id="deviceLabel">电脑端</span>）</h3>
-    <div id="methodList"></div>
-    <button class="pay-btn" id="payBtn" disabled>请选择支付方式</button>
-
-    <div class="panel" id="qrPanel">
-      <div class="qr" id="qrBox">二维码（TEST）</div>
-      <div class="countdown" id="qrHint">请使用对应 App 扫码支付</div>
-    </div>
-    <div class="panel" id="resultPanel"><div class="result" id="resultBox"></div></div>
-  </div>
-
-  <!-- 演示控制（仅 TEST）：手动切换 12 种支付状态 -->
-  <div class="card demo">
-    <p>▼ TEST 状态演示：点击切换支付页需要覆盖的 12 种状态</p>
-    <div class="btns" id="stateBtns"></div>
-  </div>
-</div>
+  <div class="demo"><details><summary>▸ TEST 状态演示（切换支付页 12 种状态）</summary><div class="btns" id="stateBtns"></div></details></div>
+  <div class="foot">如有疑问，请<a>联系客服</a>或查看<a>帮助中心</a>　·　🧪 测试模式，不产生真实扣款</div>
 
 <script>
-// ====== 配置：如接入后端，把 API_BASE 指向 Workers，例如 "https://pay.yourdomain.com" ======
-const API_BASE = ""; // 空=纯前端 TEST 演示
+// ---------- 品牌图标（近似，内部工具用） ----------
+const ICONS = {
+  wechat:`<svg viewBox="0 0 28 28"><path fill="#fff" d="M10.4 5C6 5 2.5 7.9 2.5 11.5c0 2 1.1 3.8 2.9 5L4.6 19l2.6-1.3c1 .3 1.9.4 2.9.4h.7a5.7 5.7 0 0 1-.2-1.5c0-3.4 3.3-6.1 7.4-6.1h.6C17.7 7.3 14.4 5 10.4 5Zm-2.8 4a1 1 0 1 1 0 2 1 1 0 0 1 0-2Zm5.5 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z"/><path fill="#fff" d="M25.5 17c0-2.8-2.8-5-6.2-5s-6.2 2.2-6.2 5 2.8 5 6.2 5c.8 0 1.5-.1 2.2-.3l2 1-.6-1.7c1.6-1 2.6-2.4 2.6-4Zm-8.2-1.2a.8.8 0 1 1 0 1.6.8.8 0 0 1 0-1.6Zm4 0a.8.8 0 1 1 0 1.6.8.8 0 0 1 0-1.6Z"/></svg>`,
+  alipay:`<svg viewBox="0 0 28 28"><text x="14" y="20" font-size="17" font-weight="700" text-anchor="middle" fill="#fff" font-family="PingFang SC,sans-serif">支</text></svg>`,
+  unionpay:`<svg viewBox="0 0 28 28"><text x="14" y="20" font-size="15" font-weight="700" text-anchor="middle" fill="#fff" font-family="PingFang SC,sans-serif">银</text></svg>`,
+  bank:`<svg viewBox="0 0 24 24" fill="#fff"><path d="M12 3 2.5 8v1.5h19V8L12 3Zm-6 8v6H4v2h16v-2h-2v-6h-2v6h-3v-6h-2v6H8v-6H6Z"/></svg>`,
+};
+function iconBox(key,size){const bg={wechat:'#22ac38',alipay:'#1677ff',unionpay:'#e60012',bank:'#78716c'}[key];
+  return `<span class="ico" style="background:${bg}">${ICONS[key]}</span>`;}
 
-// ---- 设备探测 ----
-const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-document.getElementById("deviceLabel").textContent = isMobile ? "手机端" : "电脑端";
+// ---------- 设备 & Apple Pay 探测 ----------
+const isMobile=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const applePaySupported=!!(window.ApplePaySession&&window.ApplePaySession.canMakePayments&&window.ApplePaySession.canMakePayments());
 
-// ---- Apple Pay 支持探测（不支持则隐藏入口，绝不做假按钮）----
-const applePaySupported = !!(window.ApplePaySession && window.ApplePaySession.canMakePayments && window.ApplePaySession.canMakePayments());
-
-// ---- 支付方式（统一组件数据）。available 由后端 /api/payments/channels 决定；此处 TEST 默认全可点 ----
-const METHODS = [
-  { key:"wechat_native", name:"微信支付",  tag: isMobile?"跳转微信":"扫码支付", color:"#09bb07", ico:"微", available:true },
-  { key:"alipay_page",   name:"支付宝",    tag: isMobile?"跳转支付宝":"网站/扫码", color:"#1677ff", ico:"支", available:true },
-  { key:"unionpay_gateway",name:"银联支付",tag:"银联收银台", color:"#e60012", ico:"银", available:true },
-  { key:"apple_pay",     name:"Apple Pay", tag: applePaySupported?"":"当前设备不支持", color:"#000", ico:"", available:applePaySupported },
-  { key:"bank_transfer", name:"对公转账",  tag:"上传凭证·财务确认", color:"#57534e", ico:"公", available:true },
+// ---------- 支付方式 ----------
+const METHODS=[
+  {key:"wechat_native",icon:"wechat",name:"微信支付",color:"#22ac38",available:true},
+  {key:"alipay_page",icon:"alipay",name:"支付宝",color:"#1677ff",available:true},
+  {key:"unionpay_gateway",icon:"unionpay",name:"银联支付",color:"#e60012",available:false,muted:"暂未开放"},
+  {key:"apple_pay",icon:"unionpay",name:"Apple Pay",color:"#000",available:applePaySupported,muted:"当前设备不支持"},
+  {key:"bank_transfer",icon:"bank",name:"对公转账",color:"#78716c",available:true},
 ];
 
-let selected = null;
-const listEl = document.getElementById("methodList");
+let selected=null;
+const listEl=document.getElementById("methodList");
 METHODS.forEach(m=>{
-  if(m.key==="apple_pay" && !m.available) return; // 不支持则不渲染入口
+  if(m.key==="apple_pay" && !applePaySupported) return; // 不支持则隐藏，绝不做假按钮
   const el=document.createElement("div");
   el.className="method"+(m.available?"":" disabled");
-  el.innerHTML=`<div class="ico" style="background:${m.color}">${m.ico|| ''}</div>
-    <div class="name">${m.name}</div><div class="tag">${m.tag||""}</div>`;
-  if(m.available) el.onclick=()=>{selected=m;document.querySelectorAll(".method").forEach(x=>x.classList.remove("sel"));
-    el.classList.add("sel");const b=document.getElementById("payBtn");b.disabled=false;b.textContent=`确认支付 ¥1,000.00`;};
+  el.innerHTML=`${iconBox(m.icon)}<div class="name">${m.name}${m.available?"":`<span class="muted">${m.muted||"暂未开放"}</span>`}</div>
+    <span class="arrow">›</span><span class="check"><svg viewBox="0 0 12 12"><path d="M10 3 4.5 8.5 2 6"/></svg></span>`;
+  el.querySelector('.check svg path').setAttribute('stroke','#fff');
+  el.querySelector('.check svg path').setAttribute('stroke-width','1.8');
+  el.querySelector('.check svg path').setAttribute('fill','none');
+  if(m.available) el.onclick=()=>{selected=m;
+    document.querySelectorAll(".method").forEach(x=>x.classList.remove("sel"));el.classList.add("sel");renderPanel();};
   listEl.appendChild(el);
 });
 
-// ---- 12 种支付状态定义 ----
-const STATES = {
-  pending:      { label:"待支付",       color:"#57534e", border:"#d6d3d1" },
-  creating:     { label:"创建支付中",   color:"#2563eb", border:"#bfdbfe" },
-  waiting:      { label:"等待付款",     color:"#2563eb", border:"#bfdbfe" },
-  success:      { label:"支付成功",     color:"#16a34a", border:"#bbf7d0" },
-  failed:       { label:"支付失败",     color:"#dc2626", border:"#fecaca" },
-  cancelled:    { label:"用户取消",     color:"#78716c", border:"#e7e5e4" },
-  timeout:      { label:"支付超时",     color:"#d97706", border:"#fed7aa" },
-  closed:       { label:"订单已关闭",   color:"#78716c", border:"#e7e5e4" },
-  confirming:   { label:"支付结果确认中",color:"#2563eb", border:"#bfdbfe" },
-  refunded:     { label:"已退款",       color:"#78716c", border:"#e7e5e4" },
-  partial_refund:{label:"部分退款",     color:"#d97706", border:"#fed7aa" },
-  refunding:    { label:"退款处理中",   color:"#d97706", border:"#fed7aa" },
-};
+// ---------- 伪二维码绘制（TEST 视觉，非真实可扫码） ----------
+function drawQR(canvas,accent){
+  const n=29,ctx=canvas.getContext('2d'),S=canvas.width,c=S/n;
+  ctx.clearRect(0,0,S,S);let seed=987654321;
+  const rnd=()=>{seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff;};
+  ctx.fillStyle="#111";
+  for(let y=0;y<n;y++)for(let x=0;x<n;x++){if(rnd()>0.52)ctx.fillRect(Math.round(x*c),Math.round(y*c),Math.ceil(c),Math.ceil(c));}
+  const clear=(x,y,s)=>{ctx.fillStyle="#fff";ctx.fillRect(x*c,y*c,s*c,s*c);};
+  const finder=(fx,fy)=>{clear(fx-1,fy-1,9);ctx.fillStyle="#111";ctx.fillRect(fx*c,fy*c,7*c,7*c);
+    ctx.fillStyle="#fff";ctx.fillRect((fx+1)*c,(fy+1)*c,5*c,5*c);ctx.fillStyle="#111";ctx.fillRect((fx+2)*c,(fy+2)*c,3*c,3*c);};
+  finder(0,0);finder(n-7,0);finder(0,n-7);
+  clear(n/2-3.5,n/2-3.5,7); // 中心留白给 logo
+}
+function renderQRLogo(iconKey){const bg={wechat:'#22ac38',alipay:'#1677ff'}[iconKey]||'#111';
+  return `<div class="qr-logo" style="background:${bg}">${ICONS[iconKey]||''}</div>`;}
 
-function setState(key){
-  const s=STATES[key]; const badge=document.getElementById("statusBadge");
-  badge.textContent=s.label; badge.style.color=s.color; badge.style.borderColor=s.border; badge.style.background=s.border+"22";
-  const qr=document.getElementById("qrPanel"), rp=document.getElementById("resultPanel");
-  qr.classList.remove("show"); rp.classList.remove("show");
-  if(key==="waiting"||key==="creating"){ qr.classList.add("show");
-    document.getElementById("qrHint").textContent = key==="creating"?"正在创建支付…":"请使用对应 App 扫码支付"; }
-  if(["success","failed","cancelled","timeout","closed","refunded","partial_refund","refunding","confirming"].includes(key)){
-    rp.classList.add("show");
-    const icon={success:"✅",failed:"❌",cancelled:"⊘",timeout:"⏱",closed:"🔒",refunded:"↩",partial_refund:"↩",refunding:"⏳",confirming:"⏳"}[key]||"";
-    const sub={success:"支付成功以服务端回调/查单为准",failed:"未扣款，可重新发起",cancelled:"您已取消本次支付",
-      timeout:"二维码已过期，请重新发起",closed:"订单已关闭",refunded:"款项已原路退回",
-      partial_refund:"部分款项已退回",refunding:"退款处理中，请稍候",confirming:"正在向支付平台确认结果…"}[key]||"";
-    document.getElementById("resultBox").innerHTML=`<div class="icon">${icon}</div><div class="msg">${s.label}</div><div class="sub">${sub}</div>`;
+// ---------- 右侧动态面板 ----------
+let qrRemain=299;
+function renderPanel(){
+  const p=document.getElementById("panel");
+  if(!selected){p.innerHTML=`<div class="result"><div class="sb">请选择左侧支付方式</div></div>`;return;}
+  if(selected.key==="bank_transfer"){
+    p.innerHTML=`
+      <div class="ph"><h4>对公转账</h4></div>
+      <div style="margin-top:8px">
+        <div class="bank-row"><span class="k">收款公司</span><span class="v">KiNG DESiGN</span></div>
+        <div class="bank-row"><span class="k">开户银行</span><span class="v">中国银行南通支行</span></div>
+        <div class="bank-row"><span class="k">银行账号</span><span class="v">6217 **** **** 0832</span></div>
+      </div>
+      <p class="bank-note">转账完成后，请上传付款凭证以便我们尽快核对并确认。到账以财务确认为准。</p>
+      <div class="drop" onclick="alert('TEST：上传付款凭证（占位）')">
+        <div class="up">↑</div><div class="t">上传付款凭证</div><div class="h">支持 JPG / PNG / PDF，单个文件不超过 10MB</div>
+      </div>`;
+    return;
   }
+  const isQR = !isMobile || selected.key==="wechat_native"||selected.key==="alipay_page";
+  const label = selected.key==="wechat_native"?"微信扫码支付":selected.key==="alipay_page"?"支付宝扫码支付":selected.name;
+  const sub = selected.key==="wechat_native"?"请使用微信扫一扫完成付款":selected.key==="alipay_page"?"请使用支付宝扫码完成付款":"请在弹出的收银台完成付款";
+  p.innerHTML=`
+    <div class="ph">${iconBox(selected.icon)}<h4>${label}</h4></div>
+    <p class="phsub">${sub}</p>
+    <div class="qr-wrap">
+      <div class="qr-box"><canvas width="360" height="360" id="qrc"></canvas>${renderQRLogo(selected.icon)}</div>
+      <div class="qr-valid">二维码有效期 <b id="qrCd">04:59</b></div>
+      <button class="refresh" onclick="qrRemain=299;renderPanel()"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg> 刷新二维码</button>
+    </div>
+    <button class="btn-dark" onclick="setState('cancelled')">取消支付</button>`;
+  const cv=document.getElementById("qrc"); if(cv) drawQR(cv, selected.color);
 }
 
-// ---- 倒计时 ----
-let remain=15*60;
-setInterval(()=>{ if(remain>0){remain--; const m=String(Math.floor(remain/60)).padStart(2,"0"),
-  s=String(remain%60).padStart(2,"0"); document.getElementById("countdown").textContent=`支付剩余 ${m}:${s}`;
-  if(remain===0) setState("timeout"); }},1000);
-
-// ---- 演示按钮 ----
+// ---------- 12 种状态 ----------
+const STATES={pending:"待支付",creating:"创建支付中",waiting:"等待付款",success:"支付成功",failed:"支付失败",
+  cancelled:"用户取消",timeout:"支付超时",closed:"订单已关闭",confirming:"支付结果确认中",refunded:"已退款",
+  partial_refund:"部分退款",refunding:"退款处理中"};
+function setState(k){
+  const p=document.getElementById("panel");
+  const ic={success:"✅",failed:"❌",cancelled:"⊘",timeout:"⏱",closed:"🔒",refunded:"↩",partial_refund:"↩",refunding:"⏳",confirming:"⏳"}[k];
+  const sb={success:"支付成功以服务端回调/查单为准",failed:"未扣款，可重新发起",cancelled:"您已取消本次支付",
+    timeout:"二维码已过期，请重新发起",closed:"订单已关闭",refunded:"款项已原路退回",partial_refund:"部分款项已退回",
+    refunding:"退款处理中，请稍候",confirming:"正在向支付平台确认结果…"}[k];
+  if(ic!==undefined){p.innerHTML=`<div class="result"><div class="ic">${ic}</div><div class="msg">${STATES[k]}</div><div class="sb">${sb}</div></div>`;}
+  else renderPanel();
+}
 const sb=document.getElementById("stateBtns");
-Object.entries(STATES).forEach(([k,v])=>{const b=document.createElement("button");b.textContent=v.label;
-  b.onclick=()=>setState(k);sb.appendChild(b);});
+Object.entries(STATES).forEach(([k,v])=>{const b=document.createElement("button");b.textContent=v;b.onclick=()=>setState(k);sb.appendChild(b);});
 
-// ---- 点击支付：TEST 演示走本地状态；接后端时改为 fetch(API_BASE+"/api/payments/create") ----
-document.getElementById("payBtn").onclick=async ()=>{
-  if(!selected) return;
-  if(selected.key==="bank_transfer"){ setState("confirming");
-    document.getElementById("resultBox").innerHTML=`<div class="icon">🏦</div><div class="msg">对公转账</div>
-    <div class="sub">请转账后上传凭证，到账以财务确认为准（pending_manual_verification）</div>`;return; }
-  setState("creating");
-  setTimeout(()=>setState("waiting"),700);
-  // TEST：3 秒后模拟服务端确认成功（真实环境由回调/查单驱动，前端只轮询状态）
-  setTimeout(()=>setState("success"),3600);
-};
+// ---------- 倒计时 ----------
+let orderRemain=770;
+setInterval(()=>{
+  if(orderRemain>0){orderRemain--;document.getElementById("orderCd").textContent=`${String(Math.floor(orderRemain/60)).padStart(2,"0")}:${String(orderRemain%60).padStart(2,"0")}`;}
+  const qc=document.getElementById("qrCd");
+  if(qc){if(qrRemain>0)qrRemain--;qc.textContent=`${String(Math.floor(qrRemain/60)).padStart(2,"0")}:${String(qrRemain%60).padStart(2,"0")}`;}
+},1000);
 
-setState("pending");
+renderPanel();
 </script>
 </body>
 </html>
