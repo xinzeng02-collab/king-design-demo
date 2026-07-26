@@ -9413,7 +9413,29 @@ body.viewer-open { overflow: hidden; }
 .vlib-selected-empty { color: rgba(0,0,0,0.45); font-size: 13px; padding: 8px 2px; }
 
 /* ===== 订单操作列按钮 ===== */
-.order-actions { display: flex; width: 100%; gap: 8px; align-items: center; justify-content: center; white-space: nowrap; }
+.order-actions { position: relative; display: flex; width: 100%; align-items: center; justify-content: center; white-space: nowrap; min-height: 40px; }
+.order-actions-main { display: flex; gap: 8px; align-items: center; }
+.order-menu-wrap { position: relative; }
+.order-menu-btn { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--color-text-secondary); font-size: 18px; line-height: 1; cursor: pointer; display: grid; place-items: center; }
+.order-menu-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.order-menu-pop { position: absolute; right: 0; top: 40px; z-index: 20; min-width: 132px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 6px; text-align: left; }
+.order-menu-pop.hidden { display: none; }
+.order-menu-pop button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 9px 12px; border-radius: 6px; font-size: 13px; color: var(--color-primary); cursor: pointer; }
+.order-menu-pop button:hover { background: #f5f4f2; }
+.order-menu-pop button.danger { color: var(--color-danger, #dc2626); }
+.order-expand-btn { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--color-text-secondary); font-size: 13px; cursor: pointer; display: grid; place-items: center; transition: transform .15s; }
+.order-expand-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.order-expand-btn.open { transform: translateY(-50%) rotate(180deg); }
+.agr-info { display: grid; gap: 6px; margin-bottom: 14px; }
+.agr-info > div { display: flex; justify-content: space-between; font-size: 13px; color: var(--color-text-secondary); }
+.agr-info strong { color: var(--color-primary); font-weight: 500; }
+.agr-upload { display: block; border: 1.5px dashed var(--color-border-strong, #d6d3d1); border-radius: 10px; padding: 22px; text-align: center; cursor: pointer; }
+.agr-upload:hover { border-color: var(--color-primary); background: #fafaf9; }
+.agr-upload.done { border-style: solid; border-color: var(--color-success, #16a34a); }
+.agr-up-ic { font-size: 20px; color: var(--color-text-secondary); }
+.agr-upload.done .agr-up-ic { color: var(--color-success, #16a34a); }
+.agr-up-t { font-size: 14px; margin: 6px 0 3px; }
+.agr-up-h { font-size: 12px; color: var(--color-text-tertiary, #a8a29e); }
 .order-deliver-btn { min-width: 72px; height: 38px; box-sizing: border-box; border: 1px solid var(--color-primary); border-radius: 8px; padding: 7px 14px; background: var(--color-primary); color: #fff; font-size: 14px; line-height: 22px; font-weight: 500; cursor: pointer; }
 .order-deliver-btn:hover { filter: brightness(1.12); }
 .order-deliver-btn.delivered { background: transparent; color: rgba(0,0,0,0.5); border: 1px solid var(--line); font-weight: 400; }

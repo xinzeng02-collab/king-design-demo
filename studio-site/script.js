@@ -3741,8 +3741,19 @@ function orderRowHtml(order, idx) {
       <td class="order-cell-status"><span class="order-deliver ${deliver === "已交付" ? "done" : "pending"}">${deliver}</span></td>
       <td class="order-cell-operation">
         <div class="order-actions">
-          <button class="order-detail-btn" type="button" data-order-expand="${escapeHtml(order.id)}">${expanded ? "收起详细" : "查看详细"}</button>
-          <button class="order-deliver-btn ${deliver === "已交付" ? "delivered" : ""} ${agreement === "待客户签署" && deliver !== "已交付" ? "awaiting-signature" : ""}" type="button" data-order-toggle-deliver="${escapeHtml(order.id)}" title="${deliver === "已交付" ? "取消本次交付" : agreement === "已签署" ? "交付已解锁作品" : "客户签署协议后方可交付"}">${deliver === "已交付" ? "取消交付" : agreement === "待客户签署" ? "待签署" : "交付"}</button>
+          <div class="order-actions-main">
+            <button class="order-deliver-btn ${deliver === "已交付" ? "delivered" : ""} ${agreement === "待客户签署" && deliver !== "已交付" ? "awaiting-signature" : ""}" type="button" data-order-toggle-deliver="${escapeHtml(order.id)}" title="${deliver === "已交付" ? "取消本次交付" : agreement === "已签署" ? "交付已解锁作品" : "客户签署协议后方可交付"}">${deliver === "已交付" ? "取消交付" : agreement === "待客户签署" ? "待签署" : "交付"}</button>
+            <div class="order-menu-wrap">
+              <button class="order-menu-btn" type="button" data-order-menu="${escapeHtml(order.id)}" aria-label="更多操作" title="更多操作">⋯</button>
+              <div class="order-menu-pop hidden" data-order-menu-pop="${escapeHtml(order.id)}">
+                <button type="button" data-order-detail="${escapeHtml(order.id)}">查看详情</button>
+                ${agreement !== "已签署" ? `<button type="button" data-order-upload-agreement="${escapeHtml(order.id)}">上传协议</button>` : ""}
+                <button type="button" data-order-close="${escapeHtml(order.id)}">关闭订单</button>
+                ${deliver !== "已交付" ? `<button type="button" class="danger" data-order-delete="${escapeHtml(order.id)}">删除订单</button>` : ""}
+              </div>
+            </div>
+          </div>
+          <button class="order-expand-btn ${expanded ? "open" : ""}" type="button" data-order-expand="${escapeHtml(order.id)}" aria-label="查看详情" title="${expanded ? "收起" : "展开详情"}">▾</button>
         </div>
       </td>
     </tr>
@@ -3775,6 +3786,175 @@ function renderOrderCenter() {
     : `<p class="empty-state">暂无订单。客户选稿后点击「生成订单」会显示在这里。</p>`;
 }
 
+/* ============ 订单生命周期详情页（内嵌产品内，真实数据驱动） ============ */
+function orderLifecycleModel(order) {
+  const agrRaw = orderAgreementStatus(order); // 未发起 / 待客户签署 / 已签署
+  const agreement = agrRaw === "已签署" ? "signed"
+    : agrRaw === "待客户签署" ? "awaiting_signature"
+    : order.agreementUploaded ? "agreement_uploaded" : "no_agreement";
+  const delivered = orderDeliverStatus(order) === "已交付";
+  const payment = order.paymentStatus === "已支付" || delivered ? "paid" : (order.paymentStatus || "unpaid");
+  const delivery = delivered ? "downloaded" : order.deliveryPrepared ? "prepared_locked" : "not_ready";
+  return { agreement, payment, delivery, delivered };
+}
+
+const OD_LABELS = {
+  agreement: { no_agreement: "未上传协议", agreement_uploaded: "协议已上传", awaiting_signature: "待客户签署", signed: "已签署" },
+  payment: { unpaid: "未支付", paid: "已支付" },
+  delivery: { not_ready: "未准备", prepared_locked: "已准备待付款", downloaded: "已交付" },
+};
+
+function ensureOrderDetailOverlay() {
+  if (document.getElementById("orderDetailOverlay")) return;
+  const style = document.createElement("style");
+  style.textContent = `
+    #orderDetailOverlay{position:fixed;inset:0;z-index:1200;display:none}
+    #orderDetailOverlay.open{display:block}
+    #orderDetailOverlay .odx-scrim{position:absolute;inset:0;background:rgba(28,25,23,.45)}
+    #orderDetailOverlay .odx-panel{position:absolute;top:0;right:0;height:100%;width:min(560px,100%);
+      background:#fafaf9;box-shadow:-8px 0 40px rgba(0,0,0,.18);overflow-y:auto;animation:odxIn .2s ease}
+    @keyframes odxIn{from{transform:translateX(30px);opacity:.6}to{transform:none;opacity:1}}
+    .odx-head{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #eae8e4;position:sticky;top:0;background:#fafaf9;z-index:2}
+    .odx-head h2{margin:0;font-size:18px}
+    .odx-close{border:none;background:none;font-size:22px;color:#78716c;cursor:pointer;line-height:1}
+    .odx-body{padding:22px 24px 40px}
+    .odx-card{background:#fff;border:1px solid #eae8e4;border-radius:16px;padding:18px 20px;margin-bottom:16px}
+    .odx-order{display:flex;gap:16px;align-items:center}
+    .odx-thumb{width:80px;height:80px;border-radius:10px;flex:none;background:linear-gradient(135deg,#efe9df,#e6ded0);border:1px solid #eae8e4;background-size:cover;background-position:center}
+    .odx-order h3{margin:0 0 6px;font-size:16px}
+    .odx-order .m{font-size:13px;color:#57534e;line-height:1.8}.odx-order .m b{color:#1c1917;font-weight:500}
+    .odx-steps{display:flex;margin:2px 0}
+    .odx-step{flex:1;text-align:center;position:relative}
+    .odx-step .d{width:26px;height:26px;border-radius:50%;background:#eceae6;color:#a8a29e;display:grid;place-items:center;margin:0 auto 7px;font-size:13px;font-weight:700;position:relative;z-index:1}
+    .odx-step.done .d{background:#1c1917;color:#fff}.odx-step.active .d{background:#2563eb;color:#fff}
+    .odx-step .t{font-size:12px;color:#57534e}.odx-step.active .t{color:#1c1917;font-weight:600}
+    .odx-step:not(:last-child):after{content:"";position:absolute;top:13px;left:50%;width:100%;height:2px;background:#eceae6;z-index:0}
+    .odx-step.done:not(:last-child):after{background:#1c1917}
+    .odx-stat{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+    .odx-stat .s{border:1px solid #eae8e4;border-radius:10px;padding:10px 12px}
+    .odx-stat .k{font-size:12px;color:#a8a29e}.odx-stat .v{font-size:14px;font-weight:600;margin-top:2px}
+    .odx-primary{width:100%;padding:14px;border:none;border-radius:10px;background:#1c1917;color:#fff;font-size:15px;font-weight:500;cursor:pointer;margin-top:18px}
+    .odx-primary:hover{background:#000}.odx-primary.wait{background:#faf9f8;color:#a8a29e;border:1.5px dashed #e2e0dc;cursor:default}
+    .odx-pt{font-size:15px;font-weight:600;margin:0 0 12px}
+    .odx-note{font-size:13px;color:#57534e;line-height:1.6}
+    .odx-locks{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+    .odx-lock{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:linear-gradient(135deg,#efe9df,#e6ded0);border:1px solid #eae8e4;background-size:cover;background-position:center}
+    .odx-lock .ov{position:absolute;inset:0;background:rgba(20,18,16,.5);display:grid;place-items:center;color:#fff;text-align:center;font-size:11px}
+    .odx-file{display:flex;align-items:center;justify-content:space-between;border:1px solid #eae8e4;border-radius:10px;padding:11px 14px;margin-top:10px}
+    .odx-file .n{font-size:14px;font-weight:500}.odx-file .s{font-size:12px;color:#a8a29e}
+    .odx-btn{padding:11px 16px;border-radius:10px;font-size:14px;cursor:pointer;border:1.5px solid #e2e0dc;background:#fff;color:#1c1917}
+    .odx-btn:hover{border-color:#1c1917}.odx-btn.dark{background:#1c1917;color:#fff;border-color:#1c1917}.odx-btn.dark:hover{background:#000}
+    .odx-btnrow{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}`;
+  document.head.appendChild(style);
+  const el = document.createElement("div");
+  el.id = "orderDetailOverlay";
+  el.innerHTML = `<div class="odx-scrim" data-od-close></div>
+    <div class="odx-panel"><div class="odx-head"><h2>订单详情</h2><button class="odx-close" data-od-close>×</button></div>
+    <div class="odx-body" id="orderDetailBody"></div></div>`;
+  document.body.appendChild(el);
+  el.addEventListener("click", (e) => { if (e.target.closest("[data-od-close]")) closeOrderDetail(); });
+}
+
+let activeOrderDetailId = "";
+function closeOrderDetail() {
+  document.getElementById("orderDetailOverlay")?.classList.remove("open");
+  activeOrderDetailId = "";
+  lockBodyScroll(false);
+}
+function openOrderDetail(orderId) {
+  const order = studioOrders.find((o) => o.id === orderId);
+  if (!order) return;
+  ensureOrderDetailOverlay();
+  activeOrderDetailId = orderId;
+  renderOrderDetailBody(order);
+  document.getElementById("orderDetailOverlay").classList.add("open");
+  lockBodyScroll(true);
+}
+function renderOrderDetailBody(order) {
+  const body = document.getElementById("orderDetailBody");
+  if (!body) return;
+  const isCustomer = currentAccount.role === "客户";
+  const L = orderLifecycleModel(order);
+  const patterns = orderPatternList(order);
+  const name = patterns.length ? `${patterns[0]}${patterns.length > 1 ? ` 等 ${patterns.length} 款` : ""}` : `${order.customer || "客户"} 订单`;
+  const price = order.price != null ? Number(order.price).toFixed(2) : (patterns.length * 100).toFixed(2);
+  const firstCard = sourceCardByFile(patterns[0]);
+  const thumbBg = firstCard?.dataset.imageData ? `background-image:url('${firstCard.dataset.imageData}')` : "";
+  // 时间线
+  const stageIdx = L.agreement !== "signed" ? 0 : L.payment !== "paid" ? 1 : L.delivery !== "downloaded" ? 2 : 3;
+  const stages = ["签约", "支付", "交付", "完成"];
+  const stepsHtml = stages.map((s, i) => `<div class="odx-step ${i < stageIdx ? "done" : i === stageIdx ? "active" : ""}"><div class="d">${i < stageIdx ? "✓" : i + 1}</div><div class="t">${s}</div></div>`).join("");
+  // 主区（按角色 + 阶段）
+  let action = "";
+  if (L.agreement !== "signed") {
+    if (isCustomer) {
+      action = L.agreement === "awaiting_signature"
+        ? `<button class="odx-btn dark" style="width:100%" data-od-action="sign">查看并签署</button>`
+        : `<div class="odx-note">销售正在准备协议，请稍候。</div>`;
+    } else {
+      action = L.agreement === "no_agreement"
+        ? `<button class="odx-btn dark" style="width:100%" data-od-action="upload-agreement">上传协议</button>`
+        : L.agreement === "agreement_uploaded"
+        ? `<button class="odx-btn dark" style="width:100%" data-od-action="upload-agreement">发起签约</button>`
+        : `<div class="odx-note">已发起签约，等待客户下载、签署并回传。</div><button class="odx-btn" style="margin-top:12px" data-od-action="upload-agreement">提醒客户签署</button>`;
+    }
+  } else if (L.payment !== "paid") {
+    action = isCustomer
+      ? `<div class="odx-note">合同已生效，请完成付款以解锁正式交付文件。</div><a class="odx-btn dark" style="display:inline-block;margin-top:12px;text-decoration:none" href="./pay.html">立即支付</a>`
+      : `<div class="odx-note">已签署，等待客户付款。付款成功后自动解锁交付。</div><button class="odx-btn" style="margin-top:12px" data-od-action="toggle-deliver">${L.delivered ? "取消交付" : "标记交付（TEST）"}</button>`;
+  } else {
+    // 已付款 / 已签署
+    if (isCustomer) {
+      action = L.delivered
+        ? `<div class="odx-file"><div><div class="n">交付包（PSD/TIFF/授权书）</div><div class="s">下载链接有效期 30 分钟</div></div><button class="odx-btn" data-od-action="download">下载</button></div>`
+        : `<div class="odx-note">款项已到账，工作室正在准备交付文件。</div>`;
+    } else {
+      action = `<button class="odx-btn ${L.delivered ? "" : "dark"}" style="width:100%" data-od-action="toggle-deliver">${L.delivered ? "取消交付" : "交付并解锁作品"}</button>`;
+    }
+  }
+  // 未付款/未签署时，客户侧展示锁定预览
+  const lockPreview = (isCustomer && !L.delivered) ? `<div class="odx-card"><div class="odx-pt">交付文件（未解锁）</div>
+    <div class="odx-note">付款成功后自动解锁正式交付文件。当前仅可确认所购花型。</div>
+    <div class="odx-locks">${patterns.slice(0, 3).map((f) => { const c = sourceCardByFile(f); const bg = c?.dataset.imageData ? `background-image:url('${c.dataset.imageData}')` : ""; return `<div class="odx-lock" style="${bg}"><div class="ov">🔒 付款后解锁</div></div>`; }).join("")}</div></div>` : "";
+
+  body.innerHTML = `
+    <div class="odx-card odx-order">
+      <div class="odx-thumb" style="${thumbBg}"></div>
+      <div><h3>${escapeHtml(name)}</h3>
+        <div class="m">订单编号　<b>${escapeHtml(order.id)}</b><br>下单用户　<b>${escapeHtml(order.viewer || order.customer || "—")}</b><br>应付金额　<b>¥${price}</b></div>
+      </div>
+    </div>
+    <div class="odx-card">
+      <div class="odx-steps">${stepsHtml}</div>
+      <div class="odx-stat">
+        <div class="s"><div class="k">签约状态</div><div class="v">${OD_LABELS.agreement[L.agreement]}</div></div>
+        <div class="s"><div class="k">支付状态</div><div class="v">${OD_LABELS.payment[L.payment]}</div></div>
+        <div class="s"><div class="k">交付状态</div><div class="v">${OD_LABELS.delivery[L.delivery]}</div></div>
+        <div class="s"><div class="k">订单状态</div><div class="v">${escapeHtml(orderProgressStatus(order))}</div></div>
+      </div>
+      <div style="margin-top:18px">${action}</div>
+    </div>
+    ${lockPreview}
+    <div class="odx-card"><div class="odx-pt">本单花型（${patterns.length}）</div>
+      <div class="odx-locks">${patterns.slice(0, 6).map((f) => { const c = sourceCardByFile(f); const bg = c?.dataset.imageData ? `background-image:url('${c.dataset.imageData}')` : ""; return `<div class="odx-lock" style="${bg}"></div>`; }).join("") || '<div class="odx-note">无花型明细</div>'}</div>
+    </div>`;
+
+  body.querySelectorAll("[data-od-action]").forEach((btn) => {
+    btn.addEventListener("click", () => onOrderDetailAction(btn.dataset.odAction, order));
+  });
+}
+function onOrderDetailAction(action, order) {
+  if (action === "upload-agreement") { closeOrderDetail(); openDeliveryAgreementModal(order, false); }
+  else if (action === "sign") { closeOrderDetail(); openDeliveryAgreementModal(order, true); }
+  else if (action === "toggle-deliver") {
+    order.deliverStatus = orderDeliverStatus(order) === "已交付" ? "未交付" : "已交付";
+    saveStudioState(); renderOrderCenter(); renderOrderDetailBody(order);
+    showToast(`订单 ${order.id} 已标记为${order.deliverStatus}。`, "success");
+  } else if (action === "download") {
+    showToast("已生成 30 分钟短期下载链接（TEST 占位）。", "success");
+  }
+}
+
 let activeAgreementOrderId = "";
 
 function closeDeliveryAgreementModal() {
@@ -3799,6 +3979,34 @@ function agreementTermsHtml(order) {
     </ol>`;
 }
 
+function agreementUploadHtml(order) {
+  const uploaded = order.agreementUploaded;
+  return `<div class="agr-info">
+      <div><span>订单</span><strong>${escapeHtml(order.id)}</strong></div>
+      <div><span>签约客户</span><strong>${escapeHtml(order.customer || "未命名客户")}</strong></div>
+      <div><span>授权作品</span><strong>${orderPatternList(order).length} 款花型</strong></div>
+    </div>
+    <label class="agr-upload ${uploaded ? "done" : ""}">
+      <input type="file" id="agreementFileInput" accept=".pdf,.doc,.docx" hidden />
+      <div class="agr-up-ic">${uploaded ? "✓" : "↑"}</div>
+      <div class="agr-up-t">${uploaded ? escapeHtml(order.agreementFileName || "已上传合同文件") : "上传合同 / 协议"}</div>
+      <div class="agr-up-h">${uploaded ? "点击可重新上传" : "支持 PDF / Word / DOCX"}</div>
+    </label>`;
+}
+
+document.querySelector("#deliveryAgreementSummary")?.addEventListener("change", (event) => {
+  const input = event.target.closest("#agreementFileInput");
+  if (!input || !input.files?.length) return;
+  const order = studioOrders.find((item) => item.id === activeAgreementOrderId);
+  if (!order) return;
+  order.agreementUploaded = true;
+  order.agreementFileName = input.files[0].name;
+  order.agreementUploadedAt = formatDateTime();
+  saveStudioState();
+  openDeliveryAgreementModal(order, false); // 重渲染以启用「发起签约」
+  showToast(`已上传合同：${order.agreementFileName}`, "success");
+});
+
 function openDeliveryAgreementModal(order, customerMode = false) {
   const modal = document.querySelector("#deliveryAgreementModal");
   if (!modal || !order) return;
@@ -3810,11 +4018,11 @@ function openDeliveryAgreementModal(order, customerMode = false) {
   const consent = document.querySelector("#deliveryAgreementConsent");
   const check = document.querySelector("#deliveryAgreementCheck");
   const submit = document.querySelector("#deliveryAgreementSubmit");
-  if (title) title.textContent = customerMode ? "作品交付与授权协议" : "交付前需完成协议";
-  if (summary) summary.innerHTML = agreementTermsHtml(order);
+  if (title) title.textContent = customerMode ? "作品交付与授权协议" : "上传协议 / 发起签约";
   consent?.classList.toggle("hidden", !customerMode);
   if (check) check.checked = false;
   if (customerMode) {
+    if (summary) summary.innerHTML = agreementTermsHtml(order);
     if (message) message.textContent = "请确认授权范围。完成签署后，工作室才能交付并解锁高清文件。";
     if (submit) {
       submit.textContent = "同意并签署";
@@ -3822,14 +4030,16 @@ function openDeliveryAgreementModal(order, customerMode = false) {
       submit.dataset.agreementMode = "customer";
     }
   } else {
+    if (summary) summary.innerHTML = agreementUploadHtml(order);
     if (message) {
       message.textContent = status === "待客户签署"
         ? "协议已发给客户，当前仍在等待客户签署。签署完成前不能交付或解锁高清文件。"
-        : "本订单尚未完成客户协议。请先发起签约，客户签署后再执行交付。";
+        : "上传合同 / 协议文件（PDF 或 Word），上传后点击「发起签约」发送给客户下载、签署并回传。";
     }
     if (submit) {
       submit.textContent = status === "待客户签署" ? "提醒客户签署" : "发起签约";
-      submit.disabled = false;
+      // 未发起且未上传合同时，禁用发起，先引导上传
+      submit.disabled = status !== "待客户签署" && !order.agreementUploaded;
       submit.dataset.agreementMode = "admin";
     }
   }
@@ -3897,6 +4107,20 @@ function closeOrder(orderId) {
   renderLibraryGrid();
   renderLibraryCart();
   showToast(`${order.id} 已关闭，稿件已回到客户稿库。`, "success");
+}
+
+function deleteStudioOrder(orderId) {
+  const order = studioOrders.find((item) => item.id === orderId);
+  if (!order) return;
+  if (orderDeliverStatus(order) === "已交付") {
+    showToast("已交付的订单不能删除，请改用关闭或归档。", "warning");
+    return;
+  }
+  if (!window.confirm(`确认删除订单 ${order.id}？此操作不可恢复。`)) return;
+  studioOrders = studioOrders.filter((item) => item.id !== orderId);
+  saveStudioState();
+  renderOrderCenter();
+  showToast(`订单 ${order.id} 已删除。`, "success");
 }
 
 function advanceOrderStatus(orderId) {
@@ -8836,10 +9060,38 @@ orderStatusFilter.addEventListener("change", renderOrderCenter);
 });
 document.querySelector("#orderSearchBtn")?.addEventListener("click", renderOrderCenter);
 orderList.addEventListener("click", (event) => {
+  // ⋯ 更多操作菜单：开关
+  const menuBtn = event.target.closest("[data-order-menu]");
+  if (menuBtn) {
+    const pop = orderList.querySelector(`[data-order-menu-pop="${CSS.escape(menuBtn.dataset.orderMenu)}"]`);
+    const willOpen = pop && pop.classList.contains("hidden");
+    orderList.querySelectorAll(".order-menu-pop").forEach((el) => el.classList.add("hidden"));
+    if (willOpen) pop.classList.remove("hidden");
+    return;
+  }
+  // 菜单项：查看详情（打开订单生命周期详情页）
+  const detailBtn = event.target.closest("[data-order-detail]");
+  if (detailBtn) {
+    openOrderDetail(detailBtn.dataset.orderDetail);
+    return;
+  }
+  // 菜单项：上传协议
+  const uploadAgrBtn = event.target.closest("[data-order-upload-agreement]");
+  if (uploadAgrBtn) {
+    const order = studioOrders.find((o) => o.id === uploadAgrBtn.dataset.orderUploadAgreement);
+    if (order) openDeliveryAgreementModal(order, false);
+    return;
+  }
+  // 菜单项：关闭订单
+  const closeMenuBtn = event.target.closest("[data-order-close]");
+  if (closeMenuBtn) { closeOrder(closeMenuBtn.dataset.orderClose); return; }
+  // 菜单项：删除订单
+  const deleteBtn = event.target.closest("[data-order-delete]");
+  if (deleteBtn) { deleteStudioOrder(deleteBtn.dataset.orderDelete); return; }
+
   const expandBtn = event.target.closest("[data-order-expand]");
   if (expandBtn) {
-    orderExpandedId = orderExpandedId === expandBtn.dataset.orderExpand ? null : expandBtn.dataset.orderExpand;
-    renderOrderCenter();
+    openOrderDetail(expandBtn.dataset.orderExpand);
     return;
   }
   const deliverBtn = event.target.closest("[data-order-toggle-deliver]");
@@ -8885,6 +9137,11 @@ orderList.addEventListener("click", (event) => {
     activeOrderFileContext = { orderId: fileButton.dataset.orderId, file: fileButton.dataset.orderFile };
     openLightbox(card);
   }
+});
+// 点击空白处关闭 ⋯ 菜单
+document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-order-menu]") || event.target.closest(".order-menu-pop")) return;
+  orderList.querySelectorAll(".order-menu-pop:not(.hidden)").forEach((el) => el.classList.add("hidden"));
 });
 orderList.addEventListener("change", (event) => {
   const input = event.target.closest("[data-order-date]");
