@@ -9431,6 +9431,16 @@ body.viewer-open { overflow: hidden; }
 .order-expand-btn { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--color-text-secondary); font-size: 13px; cursor: pointer; display: grid; place-items: center; transition: transform .15s; }
 .order-expand-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
 .order-expand-btn.open { transform: translateY(-50%) rotate(180deg); }
+/* 订单价格：待输入 / 可点击修改 */
+.order-price-btn { border: 1px dashed transparent; background: none; font: inherit; color: var(--color-primary); padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+.order-price-btn:hover { border-color: var(--color-primary); background: #faf9f8; }
+.order-price-btn.todo, .order-price-todo { color: #b45309; border-color: #fcd34d; background: #fffdf5; }
+.mo-price.todo { color: #b45309; font-size: 14px; font-weight: 600; }
+.mo-notice { margin-top: 8px; font-size: 12px; color: #b45309; background: #fffdf5; border: 1px solid #fde9b0; border-radius: 8px; padding: 6px 10px; display: inline-block; }
+/* 状态小图标 */
+.mo-ic { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; margin-right: 5px; vertical-align: -2px; }
+.mo-tag { display: inline-flex; align-items: center; }
+
 /* 客户档案 · 历史订单 */
 .cc-history { display: grid; gap: 8px; }
 .cc-hist-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; text-align: left; padding: 12px 14px; border: 1px solid var(--line, #eae8e4); border-radius: 10px; background: #fff; cursor: pointer; }
@@ -9449,8 +9459,8 @@ body.viewer-open { overflow: hidden; }
 
 /* 我的花型库：已购买待解锁 —— 45% 黑底遮罩 + 32px 白色矢量锁 */
 .mylib-card.locked { cursor: pointer; }
-.mylib-card .mylib-thumb { position: relative; }
-.mylib-lock { position: absolute; inset: 0; background: rgba(0,0,0,.45); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #fff; border-radius: inherit; }
+.mylib-card .mylib-thumb { position: relative; display: block; overflow: hidden; }
+.mylib-lock { position: absolute; inset: 0; background: rgba(0,0,0,.60); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #fff; border-radius: inherit; z-index: 2; }
 .mylib-lock small { font-size: 11px; letter-spacing: .04em; opacity: .92; }
 .mylib-lock-ic { width: 32px; height: 32px; fill: none; stroke: #fff; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .mylib-card.locked .mylib-info strong { color: var(--color-text-secondary); }

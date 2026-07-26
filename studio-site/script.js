@@ -3799,7 +3799,10 @@ function orderTableFiltered() {
 function orderRowHtml(order, idx) {
   const patterns = orderPatternList(order);
   const name = patterns.length ? `${patterns[0]}${patterns.length > 1 ? ` 等 ${patterns.length} 款` : ""}` : `${order.customer || "客户"} 订单`;
-  const price = order.price != null ? Number(order.price).toFixed(2) : (patterns.length * 100).toFixed(2);
+  const priceVal = orderPriceValue(order);
+  const priceCell = canEditOrderPrice()
+    ? `<button class="order-price-btn ${priceVal == null ? "todo" : ""}" type="button" data-order-price="${escapeHtml(order.id)}" title="点击修改价格">${priceVal == null ? "待输入" : `¥${priceVal.toFixed(2)}`}</button>`
+    : `<span class="${priceVal == null ? "order-price-todo" : ""}">${orderPriceText(order)}</span>`;
   const time = order.createdAt || order.time || "—";
   const user = order.viewer || order.customer || "—";
   const deliver = orderDeliverStatus(order);
@@ -3815,7 +3818,7 @@ function orderRowHtml(order, idx) {
       <td class="order-cell-index">${idx + 1}</td>
       <td class="order-cell-number">${escapeHtml(order.id)}</td>
       <td class="order-cell-product">${escapeHtml(name)}</td>
-      <td class="order-cell-price">${price}</td>
+      <td class="order-cell-price">${priceCell}</td>
       <td class="order-cell-time">${escapeHtml(time)}</td>
       <td class="order-cell-user">${escapeHtml(user)}</td>
       <td class="order-cell-status">
@@ -3890,6 +3893,37 @@ const OD_LABELS = {
   payment: { unpaid: "未支付", paid: "已支付" },
   delivery: { not_ready: "未准备", prepared_locked: "已准备待付款", downloaded: "已交付" },
 };
+
+/* 订单价格：默认「待输入」——价格线下商定后由管理员/销售录入 */
+function orderPriceValue(order) {
+  if (order && order.price != null && order.price !== "" && !Number.isNaN(Number(order.price))) return Number(order.price);
+  return null;
+}
+function orderPriceText(order) {
+  const v = orderPriceValue(order);
+  return v == null ? "待输入" : `¥${v.toFixed(2)}`;
+}
+function canEditOrderPrice() {
+  return currentAccount.role === "管理员" || currentAccount.role === "销售";
+}
+function editOrderPrice(orderId) {
+  if (!canEditOrderPrice()) return;
+  const order = studioOrders.find((o) => o.id === orderId);
+  if (!order) return;
+  if (order.paymentStatus === "已支付") { showToast("订单已支付，价格不可再修改。", "warning"); return; }
+  const cur = orderPriceValue(order);
+  const input = window.prompt(`设置订单 ${order.id} 的成交价格（元）：`, cur == null ? "" : String(cur));
+  if (input === null) return;
+  const v = Number(String(input).trim());
+  if (!Number.isFinite(v) || v < 0) { showToast("请输入有效的价格数字。", "warning"); return; }
+  const before = cur == null ? "待输入" : `¥${cur.toFixed(2)}`;
+  order.price = v;
+  logOrderEvent(order, `订单价格由 ${before} 变更为 ¥${v.toFixed(2)}`, currentAccount.role || "员工");
+  saveStudioState();
+  renderOrderCenter();
+  if (activeOrderDetailId === order.id) renderOrderDetailBody(order);
+  showToast(`订单 ${order.id} 价格已更新为 ¥${v.toFixed(2)}`, "success");
+}
 
 /* 订单动态：客户/员工的每一步操作都留痕，管理员在订单详情能看到 */
 function logOrderEvent(order, text, who) {
@@ -4065,34 +4099,124 @@ function renderOrderDetailBody(order) {
 const PAY_PAYLOAD_KEY = "king_pay_payload";
 const PAY_RESULT_KEY = "king_pay_result";
 
+/* 应用内支付弹层：不跳页，避免返回后状态错乱/白屏，支付结果即时反馈 */
 function openPaymentPage(order) {
   if (!order) return;
+  if (orderPriceValue(order) == null) {
+    showToast("该订单尚未定价，请联系工作室确认价格后再支付。", "warning");
+    return;
+  }
   const patterns = orderPatternList(order);
-  const items = patterns.map((f) => {
-    const card = sourceCardByFile(f);
-    return {
-      file: f,
-      name: card?.querySelector(".work-head strong")?.textContent.trim() || f,
-      code: card?.dataset.code || f,
-      colors: Number(card?.dataset.colors || 1),
-      thumb: card?.dataset.imageData || "",
-      license: order.licenseType || "非独家授权",
-    };
+  const payable = orderPriceValue(order) || 0;
+  let ov = document.getElementById("payOverlay");
+  if (!ov) {
+    const st = document.createElement("style");
+    st.textContent = `
+      #payOverlay{position:fixed;inset:0;z-index:1400;display:none}
+      #payOverlay.open{display:block}
+      #payOverlay .pv-scrim{position:absolute;inset:0;background:rgba(20,18,16,.6)}
+      #payOverlay .pv-box{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+        width:min(920px,94vw);max-height:88vh;background:#fafaf9;border-radius:18px;overflow:hidden;display:flex;flex-direction:column}
+      #payOverlay .pv-head{display:flex;align-items:center;justify-content:space-between;padding:18px 24px;
+        background:#fff;border-bottom:1px solid #eae8e4}
+      #payOverlay .pv-head h3{margin:0;font-size:18px}
+      #payOverlay .pv-x{border:none;background:none;font-size:22px;color:#78716c;cursor:pointer}
+      #payOverlay .pv-body{display:grid;grid-template-columns:1.3fr 1fr;gap:20px;padding:22px 24px;overflow:hidden;flex:1}
+      #payOverlay .pv-col{overflow-y:auto;overscroll-behavior:contain;padding-right:6px}
+      #payOverlay .pv-card{background:#fff;border:1px solid #eae8e4;border-radius:14px;padding:16px 18px;margin-bottom:14px}
+      #payOverlay .pv-item{display:flex;gap:14px;align-items:center}
+      #payOverlay .pv-item+.pv-item{margin-top:14px;padding-top:14px;border-top:1px solid #f0eeeb}
+      #payOverlay .pv-th{width:64px;height:64px;border-radius:10px;flex:none;background:#f0ece6 center/cover no-repeat;border:1px solid #eae8e4}
+      #payOverlay .pv-nm{font-size:14px;font-weight:500}
+      #payOverlay .pv-cd{font-size:12px;color:#a8a29e;margin-top:3px}
+      #payOverlay .pv-row{display:flex;justify-content:space-between;font-size:14px;color:#57534e;padding:6px 0}
+      #payOverlay .pv-total{display:flex;justify-content:space-between;align-items:baseline;
+        border-top:1px dashed #e2e0dc;margin-top:10px;padding-top:12px}
+      #payOverlay .pv-total .v{font-size:24px;font-weight:800;color:#e02424}
+      #payOverlay .pv-m{display:flex;align-items:center;gap:12px;padding:14px 16px;border:1.5px solid #e2e0dc;
+        border-radius:12px;margin-bottom:10px;cursor:pointer}
+      #payOverlay .pv-m:hover{border-color:#a8a29e}
+      #payOverlay .pv-m.on{border-color:#1c1917;box-shadow:0 0 0 1px #1c1917 inset}
+      #payOverlay .pv-ic{width:30px;height:30px;border-radius:8px;flex:none;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700}
+      #payOverlay .pv-mn{flex:1;font-size:14px}
+      #payOverlay .pv-tip{font-size:12px;color:#a8a29e}
+      #payOverlay .pv-pay{width:100%;padding:14px;border:none;border-radius:10px;background:#15703c;color:#fff;
+        font-size:15px;font-weight:500;cursor:pointer;margin-top:6px}
+      #payOverlay .pv-pay:hover{background:#125f33}
+      #payOverlay .pv-note{font-size:12px;color:#a8a29e;text-align:center;margin-top:10px}
+      @media(max-width:820px){#payOverlay .pv-body{grid-template-columns:1fr}}`;
+    document.head.appendChild(st);
+    ov = document.createElement("div");
+    ov.id = "payOverlay";
+    ov.innerHTML = `<div class="pv-scrim" data-pv-close></div>
+      <div class="pv-box"><div class="pv-head"><h3>确认并支付</h3><button class="pv-x" data-pv-close>×</button></div>
+      <div class="pv-body" id="pvBody"></div></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener("click", (e) => { if (e.target.closest("[data-pv-close]")) closePaymentOverlay(); });
+  }
+  const METHODS = [
+    { k: "wechat", n: "微信支付", c: "#22ac38", t: "微" },
+    { k: "alipay", n: "支付宝", c: "#1677ff", t: "支" },
+    { k: "bank", n: "对公转账", c: "#78716c", t: "公" },
+  ];
+  document.getElementById("pvBody").innerHTML = `
+    <div class="pv-col">
+      <div class="pv-card">${patterns.map((f) => {
+        const c = sourceCardByFile(f);
+        const nm = c?.querySelector(".work-head strong")?.textContent.trim() || f;
+        const bg = c?.dataset.imageData ? `background-image:url('${c.dataset.imageData}')` : "";
+        return `<div class="pv-item"><div class="pv-th" style="${bg}"></div>
+          <div><div class="pv-nm">${escapeHtml(nm)}</div><div class="pv-cd">${Number(c?.dataset.colors || 1)} 配色</div></div></div>`;
+      }).join("")}
+      <div class="pv-cd" style="margin-top:14px;padding-top:12px;border-top:1px solid #f0eeeb">订单编号 ${escapeHtml(order.id)}　·　共 ${patterns.length} 款花型</div></div>
+      <div class="pv-card"><div style="font-size:14px;font-weight:600;margin-bottom:12px">选择支付方式</div>
+        ${METHODS.map((m, i) => `<div class="pv-m ${i === 0 ? "on" : ""}" data-pv-method="${m.n}">
+          <span class="pv-ic" style="background:${m.c}">${m.t}</span><span class="pv-mn">${m.n}</span>
+          <span class="pv-tip">${m.k === "bank" ? "凭证由财务确认" : "扫码支付"}</span></div>`).join("")}
+      </div>
+    </div>
+    <div class="pv-col">
+      <div class="pv-card">
+        <div style="font-size:14px;font-weight:600;margin-bottom:10px">订单摘要</div>
+        <div class="pv-row"><span>商品金额</span><span>¥${payable.toFixed(2)}</span></div>
+        <div class="pv-row"><span>优惠金额</span><span>¥0.00</span></div>
+        <div class="pv-total"><span style="font-size:15px;font-weight:600">应付金额</span><span class="v">¥${payable.toFixed(2)}</span></div>
+        <button class="pv-pay" data-pv-confirm="${escapeHtml(order.id)}">标记为已支付（TEST）</button>
+        <div class="pv-note">测试模式：真实支付通道接入后此按钮将移除</div>
+      </div>
+    </div>`;
+  const body = document.getElementById("pvBody");
+  body.querySelectorAll("[data-pv-method]").forEach((el) => {
+    el.addEventListener("click", () => body.querySelectorAll(".pv-m").forEach((x) => x.classList.toggle("on", x === el)));
   });
-  const subtotal = Number(order.subtotal != null ? order.subtotal : (order.price != null ? order.price : patterns.length * 100));
-  const discount = Number(order.discount || 0);
-  const payload = {
-    orderId: order.id,
-    customer: order.customer || "",
-    createdAt: order.createdAt || "",
-    license: order.licenseType || "非独家授权",
-    subtotal, discount, payable: Math.max(subtotal - discount, 0),
-    items,
-  };
-  try { sessionStorage.setItem(PAY_PAYLOAD_KEY, JSON.stringify(payload)); } catch {}
+  body.querySelector("[data-pv-confirm]")?.addEventListener("click", () => {
+    const method = body.querySelector(".pv-m.on")?.dataset.pvMethod || "";
+    confirmPaymentPaid(order, method);
+  });
   logOrderEvent(order, "客户进入支付页", "客户");
   saveStudioState();
-  window.location.href = `./pay.html?order=${encodeURIComponent(order.id)}`;
+  ov.classList.add("open");
+  lockBodyScroll(true);
+}
+function closePaymentOverlay() {
+  document.getElementById("payOverlay")?.classList.remove("open");
+  lockBodyScroll(false);
+}
+function confirmPaymentPaid(order, method) {
+  if (order.paymentStatus === "已支付") { closePaymentOverlay(); return; }
+  order.paymentStatus = "已支付";
+  order.paidAt = formatDateTime();
+  order.paidAmount = orderPriceValue(order);
+  order.paidMethod = method || "";
+  logOrderEvent(order, `支付成功${method ? "（" + method + "）" : ""} · TEST 模拟`, "客户");
+  saveStudioState();
+  closePaymentOverlay();
+  renderOrderCenter();
+  if (typeof renderMyOrders === "function") renderMyOrders();
+  if (typeof renderMyPatternLibrary === "function") renderMyPatternLibrary();
+  updateSidebarBadges();
+  showToast(`支付成功！花型已加入你的花型库，等待工作室交付解锁。`, "success");
+  if (currentAccount.role === "客户") switchView("myLibrary");
 }
 
 // 从支付页返回后，应用支付结果（支付成功以此处入账为准）
@@ -4119,9 +4243,22 @@ function applyPendingPaymentResult() {
   showToast(`订单 ${order.id} 支付成功，花型已加入你的花型库（待交付解锁）。`, "success");
 }
 window.addEventListener("focus", applyPendingPaymentResult);
-// 支付页是整页跳回，focus 不一定触发 —— 载入后主动结算一次（这才是入账的关键路径）
+// 兼容旧的跳页支付结果
 document.addEventListener("DOMContentLoaded", () => setTimeout(applyPendingPaymentResult, 60));
 window.addEventListener("load", () => setTimeout(applyPendingPaymentResult, 120));
+
+/* 安全兜底：若遗留了看稿全屏遮罩但遮罩本身并未激活，会导致整页黑屏。启动时清理。 */
+function clearStuckOverlays() {
+  const viewerLib = document.querySelector("#viewerLibrary");
+  const viewerEntry = document.querySelector("#viewerEntry");
+  const libActive = viewerLib?.classList.contains("active");
+  const entryActive = viewerEntry?.classList.contains("active");
+  if (!libActive && !entryActive) {
+    document.body.classList.remove("viewer-open");
+    document.body.style.overflow = "";
+  }
+}
+window.addEventListener("load", () => setTimeout(clearStuckOverlays, 150));
 
 /* ============ 侧边栏小圆点通知 ============ */
 function updateSidebarBadges() {
@@ -4203,22 +4340,28 @@ function renderMyOrders() {
     const first = sourceCardByFile(patterns[0]);
     const bg = first?.dataset.imageData ? `background-image:url('${first.dataset.imageData}')` : "";
     const name = patterns.length ? `${patterns[0]}${patterns.length > 1 ? ` 等 ${patterns.length} 款` : ""}` : "订单";
-    const price = (o.price != null ? Number(o.price) : patterns.length * 100).toFixed(2);
-    const lic = o.licenseType || "非独家授权";
     const btn = moPrimaryAction(o);
+    const ICON = {
+      ok: `<svg viewBox="0 0 24 24" class="mo-ic"><path d="M20 6 9 17l-5-5"/></svg>`,
+      wait: `<svg viewBox="0 0 24 24" class="mo-ic"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
+      lock: `<svg viewBox="0 0 24 24" class="mo-ic"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></svg>`,
+      pen: `<svg viewBox="0 0 24 24" class="mo-ic"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>`,
+    };
+    const tag = (icon, label, ok) => `<span class="mo-tag ${ok ? "ok" : ""}">${icon}${label}</span>`;
     return `<article class="mo-card" data-mo-open="${escapeHtml(o.id)}">
       <div class="mo-cover" style="${bg}"></div>
       <div class="mo-main">
-        <div class="mo-l1"><strong>${escapeHtml(name)}</strong><span class="mo-chip">${escapeHtml(lic)}</span></div>
+        <div class="mo-l1"><strong>${escapeHtml(name)}</strong></div>
         <div class="mo-l2">订单编号 ${escapeHtml(o.id)}　·　${escapeHtml(o.createdAt || "—")}　·　${patterns.length} 款花型</div>
+        ${o.customerNotice && L.agreement !== "signed" ? `<div class="mo-notice">${escapeHtml(o.customerNotice)}</div>` : ""}
         <div class="mo-tags">
-          <span class="mo-tag">签约：${OD_LABELS.agreement[L.agreement]}</span>
-          <span class="mo-tag ${L.payment === "paid" ? "ok" : ""}">支付：${OD_LABELS.payment[L.payment]}</span>
-          <span class="mo-tag ${L.delivered ? "ok" : ""}">交付：${OD_LABELS.delivery[L.delivery]}</span>
+          ${tag(L.agreement === "signed" ? ICON.ok : ICON.pen, OD_LABELS.agreement[L.agreement], L.agreement === "signed")}
+          ${tag(L.payment === "paid" ? ICON.ok : ICON.wait, OD_LABELS.payment[L.payment], L.payment === "paid")}
+          ${tag(L.delivered ? ICON.ok : ICON.lock, OD_LABELS.delivery[L.delivery], L.delivered)}
         </div>
       </div>
       <div class="mo-right">
-        <div class="mo-price">¥${price}</div>
+        <div class="mo-price ${orderPriceValue(o) == null ? "todo" : ""}">${orderPriceText(o)}</div>
         <button class="mo-btn ${btn.disabled ? "wait" : ""}" type="button" ${btn.disabled ? "disabled" : ""} data-mo-act="${btn.act || ""}" data-mo-id="${escapeHtml(o.id)}">${btn.label}</button>
       </div>
     </article>`;
@@ -4500,8 +4643,11 @@ document.querySelector("#deliveryAgreementSubmit")?.addEventListener("click", (e
   if (orderAgreementStatus(order) !== "待客户签署") {
     order.agreementStatus = "待客户签署";
     order.agreementRequestedAt = formatDateTime();
+    order.customerNotice = "工作室已发起签约，请查看并签署协议。";
+    order.customerNoticeAt = formatDateTime();
     logOrderEvent(order, "已发起签约，等待客户签署", currentAccount.role || "员工");
     saveStudioState();
+    updateSidebarBadges();
     renderOrderCenter();
     closeDeliveryAgreementModal();
     if (activeOrderDetailId === order.id) openOrderDetail(order.id);
@@ -4509,7 +4655,11 @@ document.querySelector("#deliveryAgreementSubmit")?.addEventListener("click", (e
     return;
   }
   order.agreementRemindedAt = formatDateTime();
+  order.customerNotice = "工作室提醒你尽快签署本订单协议。";
+  order.customerNoticeAt = formatDateTime();
+  logOrderEvent(order, "提醒客户签署协议", currentAccount.role || "员工");
   saveStudioState();
+  updateSidebarBadges();
   closeDeliveryAgreementModal();
   showToast(`已提醒客户签署订单 ${order.id} 的协议。`, "success");
 });
@@ -9486,6 +9636,9 @@ orderStatusFilter.addEventListener("change", renderOrderCenter);
 });
 document.querySelector("#orderSearchBtn")?.addEventListener("click", renderOrderCenter);
 orderList.addEventListener("click", (event) => {
+  // 价格：点击修改（管理员/销售）
+  const priceBtn = event.target.closest("[data-order-price]");
+  if (priceBtn) { editOrderPrice(priceBtn.dataset.orderPrice); return; }
   // ⋯ 更多操作菜单：开关
   const menuBtn = event.target.closest("[data-order-menu]");
   if (menuBtn) {
