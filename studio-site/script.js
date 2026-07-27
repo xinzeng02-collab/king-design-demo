@@ -1,3 +1,137 @@
+
+/* ===================================================================
+   「项目进度」模块已整体移除（准备重做）。
+   下面是最小兼容桩：仅供尚未清理的旧调用点安全降级，不含任何业务逻辑。
+   重做项目进度时，请删除本段并实现真正的函数。
+   =================================================================== */
+const PROJECT_MODULE_REMOVED = true;
+// 返回数组的
+function activeProjectItems() { return []; }
+function memberProjectItems() { return []; }
+function riskProjectPeople() { return []; }
+function projectOptions() { return []; }
+function projectOwnerNames() { return []; }
+function projectFileEntries() { return []; }
+function projectMemberCandidates() { return []; }
+function loadProjectDrafts() { return []; }
+// 返回对象/字符串的
+function activeProject() { return null; }
+function projectDropColumn() { return null; }
+function workProjectName() { return ""; }
+function projectMemberRoleLabel(r) { return r || ""; }
+function formatProjectDateInput(v) { return v || ""; }
+function normalizeProjectBoardStatus(s) { return s || ""; }
+function normalizeProjectLifecycleProject(p) { return p; }
+function canManageProjectLifecycle() { return false; }
+// 无副作用的空操作
+function syncProjectLibrary() {}
+function syncProjectMemberOptions() {}
+function normalizeProjectLifecycleData() {}
+function renderCustomProjects() {}
+function renderProjectResults() {}
+function renderLinkedProjects() {}
+function renderProjectTypeFilterSummary() {}
+function renderProjectStatusOptions() {}
+function renderProjectTypeOptions() {}
+function renderProjectCustomerOptions() {}
+function renderProjectDetailMemberSelection() {}
+function renderProjectFileReadout() {}
+function renderProjectFileManager() {}
+function renderProjectFileViewer() {}
+function updateProjectMemberSummaries() {}
+function updateCardProject() {}
+function saveProjectDrafts() {}
+function saveCreateProjectDraft() {}
+function saveProjectDetailDraft() {}
+function saveProjectDetailChanges() {}
+function restoreProjectDraft() {}
+function deleteProject() {}
+function moveProjectToStage() {}
+function refreshProjectDetail() {}
+function mergeProjectFiles(a) { return a || []; }
+function projectStoredFileName(item) { return (item && (item.name || item.fileName)) || ""; }
+function chooseProjectCustomer() {}
+function createDefaultProjectCustomer() {}
+function setProjectCustomerOpen() {}
+function clearProjectValidation() {}
+function createProjectFromModal() {}
+function attachProjectDetailFiles() {}
+function downloadProjectFile() {}
+function removeProjectFileByEntryId() {}
+function applyProjectFileTransform() {}
+function resetProjectFileTransform() {}
+function changeProjectFileZoom() {}
+function openProjectFileViewer() {}
+function closeProjectFileViewer() {}
+function closeProjectFileManager() {}
+function openProjectCreateModal() {}
+function openProjectEditModal() {}
+function requestCloseProjectCreateModal() {}
+function openProjectDetail() {}
+function closeProjectDetailModal() {}
+function requestCloseProjectDetailModal() {}
+function closeProjectDraftBox() {}
+function closeProjectArchiveModal() {}
+function openProjectLifecycleModal() {}
+function closeProjectLifecycleModal() {}
+function handleProjectLifecycleAction() {}
+function submitProjectLifecycleAction() {}
+function openTeamProjectsModal() {}
+function closeTeamProjectsModal() {}
+function renderProjectArchiveList() {}
+function renderProjectArchiveCount() {}
+function openProjectArchiveModal() {}
+function renderProjectDrafts() {}
+function openProjectDraftBox() {}
+function projectLog() {}
+function persistProjectLifecycle() {}
+function changeProjectStage() {}
+function archiveProject() {}
+function projectDetailHtml() { return ""; }
+function projectDetailTopHtml() { return ""; }
+function updateProjectDetailTop() {}
+function projectLifecyclePanelHtml() { return ""; }
+function projectLifecycleFormHtml() { return ""; }
+function projectFolderHtml() { return ""; }
+function projectFileTileHtml() { return ""; }
+function renderProjectLogItems() { return ""; }
+function projectChangeLogEntries() { return []; }
+function projectImageEntries() { return []; }
+function isProjectPdfFile() { return false; }
+function projectFileSource() { return null; }
+function renderProjectFilePalette() {}
+function projectDetailSelectedMembers() { return []; }
+function resetProjectMemberSearches() {}
+function resetProjectModal() {}
+function fillProjectModal() {}
+function closeProjectCreateModal() {}
+function serializeProjectFiles() { return []; }
+function showProjectValidation() {}
+function projectCustomerNames() { return []; }
+function projectFileIdentity() { return ""; }
+function addProjectNoteLog() {}
+function renderProjectNoteLog() {}
+function projectAvatarHtml() { return ""; }
+function projectBoardCardHtml() { return ""; }
+function projectBoardThumbnailHtml() { return ""; }
+function projectBoardThumbnailSource(v) { return v || ""; }
+function mergedBoardProjects() { return []; }
+function projectVisibleOnBoard() { return false; }
+function selectedProjectTypeFilters() { return []; }
+function projectTypeValue(p) { return (p && p.type) || ""; }
+function projectVisibleForCurrentAccount() { return false; }
+function projectParticipantCanUpload() { return false; }
+function projectProgressWidth() { return 0; }
+function projectStatusDisplay(p) { return (p && p.status) || ""; }
+function projectRuntimeStatus(p) { return (p && p.status) || ""; }
+function projectStage(p) { return (p && p.status) || ""; }
+function setProjectStage() {}
+function projectStatusClass() { return ""; }
+function validProjectDate() { return true; }
+function projectDateText(v) { return v || ""; }
+function visibleProjectItems() { return []; }
+/* ============ 兼容桩结束 ============ */
+
 const titleMap = {
   dashboard: "管理员总控制台",
   review: "每日稿件评审",
@@ -616,20 +750,6 @@ const baseProjectNames = new Set(projectLibrary.map((item) => item.name));
 let customProjects = [];
 let customCustomers = [];
 
-function syncProjectLibrary() {
-  for (let index = projectLibrary.length - 1; index >= 0; index -= 1) {
-    if (!baseProjectNames.has(projectLibrary[index].name)) projectLibrary.splice(index, 1);
-  }
-  customProjects.forEach((project) => {
-    if (project.archived || project.projectResult) return;
-    if (!project?.name || projectLibrary.some((item) => item.name === project.name)) return;
-    projectLibrary.unshift({
-      name: project.name,
-      status: project.status || "新建项目",
-      members: project.members || [...(project.designers || []), ...(project.painters || [])].join("、") || project.owner || "待分配",
-    });
-  });
-}
 
 function stableCaseIndex(text, length) {
   if (!length) return 0;
@@ -774,95 +894,13 @@ function syncCustomerOptions() {
   });
 }
 
-function projectStatusClass(status) {
-  if (status === "已关闭") return "closed";
-  if (status === "内部定稿" || status === "定稿交付" || status === "已完成") return "done";
-  if (status === "设计制作" || status === "稿件评审" || status === "执行中") return "working";
-  return "waiting";
-}
 
-function normalizeProjectBoardStatus(status) {
-  const map = {
-    新建: "需求确认",
-    策划中: "概念方案",
-    方案制定: "概念方案",
-    自主稿筛选: "需求确认",
-    内部补库: "需求确认",
-    客户初选: "需求确认",
-    执行中: "设计制作",
-    出稿评审: "稿件评审",
-    待评审: "稿件评审",
-    修改复审: "修改完善",
-    打样确认: "内部定稿",
-    定稿交付: "内部定稿",
-    已完成: "内部定稿",
-    待交付: "内部定稿",
-    已交付: "内部定稿",
-    交付准备: "内部定稿",
-    交付完成: "内部定稿",
-  };
-  return projectBoardStages.some((stage) => stage.status === status) ? status : map[status] || "需求确认";
-}
 
-function projectStage(project) {
-  return normalizeProjectBoardStatus(project?.stage || project?.status || "需求确认");
-}
 
-function setProjectStage(project, stage) {
-  const normalized = normalizeProjectBoardStatus(stage);
-  project.stage = normalized;
-  project.status = normalized;
-  return normalized;
-}
 
-function normalizeProjectLifecycleProject(project) {
-  if (!project || typeof project !== "object") return project;
-  const legacyStage = String(project.stage || project.status || "需求确认");
-  const wasDelivered = ["已交付", "交付完成"].includes(legacyStage);
-  setProjectStage(project, project.stage || project.status || "需求确认");
-  project.projectResult = ["completed", "cancelled", "terminated"].includes(project.projectResult) ? project.projectResult : null;
-  if (wasDelivered && !project.projectResult) {
-    const completedAt = project.deliveredAt || project.completedAt || formatDateTime();
-    project.projectResult = "completed";
-    project.completedAt = completedAt;
-    project.archivedAt = project.archivedAt || completedAt;
-    project.archivedFromStage = "内部定稿";
-    project.archiveReason = project.archiveReason || "历史已交付项目已完成";
-  }
-  project.archived = Boolean(project.archived || project.projectResult);
-  project.projectStatus = project.projectStatus === "paused" ? "paused" : "normal";
-  project.deliveryStatus = project.deliveryStatus || (wasDelivered ? "delivered" : "pending");
-  project.deliveryFiles = Array.isArray(project.deliveryFiles) ? project.deliveryFiles : [];
-  project.deliveryNote = project.deliveryNote || "";
-  project.deliveryReceiver = project.deliveryReceiver || "";
-  project.deliveryVersion = project.deliveryVersion || "";
-  project.archiveHistory = Array.isArray(project.archiveHistory) ? project.archiveHistory : [];
-  project.changeLogs = Array.isArray(project.changeLogs) ? project.changeLogs : [];
-  return project;
-}
 
-function normalizeProjectLifecycleData() {
-  customProjects = (customProjects || []).map(normalizeProjectLifecycleProject).filter(Boolean);
-}
 
-function projectRuntimeStatus(project) {
-  if (project?.projectStatus === "paused") return "paused";
-  const days = daysUntil(project?.endAt);
-  if (Number.isFinite(days) && days < 0) return "overdue";
-  if (Number.isFinite(days) && days >= 0 && days <= 7) return "due-soon";
-  return "normal";
-}
 
-function projectStatusDisplay(project) {
-  const runtimeStatus = projectRuntimeStatus(project);
-  const remainingDays = daysUntil(project?.endAt);
-  if (runtimeStatus === "paused") return { key: "paused", label: "暂停中" };
-  if (runtimeStatus === "overdue") return { key: "overdue", label: `已逾期 ${Math.abs(remainingDays)} 天` };
-  if (runtimeStatus === "due-soon") {
-    return { key: "due-soon", label: remainingDays === 0 ? "今天到期" : `${remainingDays} 天后到期` };
-  }
-  return { key: "normal", label: "正常" };
-}
 
 const projectResultLabels = {
   completed: "已完成",
@@ -870,30 +908,7 @@ const projectResultLabels = {
   terminated: "已终止",
 };
 
-function canManageProjectLifecycle(project) {
-  if (currentAccount.role === "管理员") return true;
-  const name = currentAccountDisplayName();
-  return Boolean(name && ([...(project?.owners || []), ...String(project?.owner || "").split("、")].includes(name)));
-}
 
-function projectProgressWidth(status) {
-  const widths = {
-    需求确认: 14,
-    概念方案: 25,
-    设计制作: 46,
-    稿件评审: 58,
-    修改完善: 72,
-    内部定稿: 100,
-    定稿交付: 100,
-    新建: 14,
-    策划中: 25,
-    执行中: 46,
-    待评审: 58,
-    已完成: 100,
-    已关闭: 100,
-  };
-  return widths[status] || 12;
-}
 
 function stageColor(status) {
   return projectBoardStages.find((stage) => stage.status === normalizeProjectBoardStatus(status))?.color || "#3b82f6";
@@ -903,191 +918,19 @@ function currentAccountDisplayName() {
   return String(currentAccount.name || "").split("/")[0].trim();
 }
 
-function projectParticipantCanUpload(project) {
-  if (currentAccount.role === "管理员") return true;
-  const name = currentAccountDisplayName();
-  if (!name) return false;
-  if (currentAccount.role === "设计师") return (project.designers || []).includes(name);
-  if (currentAccount.role === "手绘师") return (project.painters || []).includes(name);
-  return false;
-}
 
-function projectVisibleForCurrentAccount(project) {
-  if (currentAccount.role === "管理员") return true;
-  const name = currentAccountDisplayName();
-  if (!name) return false;
-  if (currentAccount.role === "设计师") return (project.designers || []).includes(name) || project.owner === name;
-  if (currentAccount.role === "手绘师") return (project.painters || []).includes(name) || project.owner === name;
-  return false;
-}
 
-function projectTypeValue(project) {
-  if (project.type) return project.type;
-  const customer = project.customer || "";
-  if (customer.includes("内部") || customer.includes("非客户")) return "内部";
-  return "定制";
-}
 
-function selectedProjectTypeFilters() {
-  if (!projectTypeFilter) return ["选稿", "定制", "内部"];
-  return [...projectTypeFilter.querySelectorAll('input[type="checkbox"]:checked')]
-    .map((input) => input.value)
-    .filter((value) => value !== "all");
-}
 
-function renderProjectTypeFilterSummary() {
-  if (!projectTypeFilterSummary) return;
-  const selected = selectedProjectTypeFilters();
-  if (projectTypeFilterSummary) projectTypeFilterSummary.textContent = selected.length === 3 ? "全部类型" : selected.length ? selected.map((type) => type === "内部" ? "内部项目" : type === "定制" ? "定制项目" : type).join("、") : "未选择类型";
-}
 
-function projectVisibleOnBoard(project) {
-  if (currentAccount.role === "管理员") return true;
-  const name = currentAccountDisplayName();
-  if (!name) return false;
-  if (project.createdBy && project.createdBy === name) return true;
-  const members = [...(project.members || []), ...(project.designers || []), ...(project.painters || []), project.owner || ""].join("、");
-  return members.includes(name);
-}
 
-function mergedBoardProjects() {
-  const defaults = defaultBoardProjects.map((project) => ({
-    ...project,
-    status: projectBoardOverrides[project.id] || project.status,
-    source: "default",
-  }));
-  const created = customProjects.map((sourceProject) => {
-    const project = normalizeProjectLifecycleProject(sourceProject);
-    return {
-    ...project,
-    status: projectStage(project),
-    stage: projectStage(project),
-    type: projectTypeValue(project),
-    due: project.endAt ? project.endAt.slice(5).replace("-", "-") : "未定",
-    progress: projectProgressWidth(project.status || "需求确认"),
-    swatches: project.swatches || ["mint", "coral", "gray"],
-    members: Array.isArray(project.members)
-      ? project.members
-      : project.members
-        ? String(project.members).split("、").filter(Boolean)
-        : [...(project.designers || []), ...(project.painters || [])],
-    source: "custom",
-  };
-  });
-  const selectedTypes = selectedProjectTypeFilters();
-  return [...created, ...defaults].filter((project) => {
-    const typeOk = selectedTypes.includes(projectTypeValue(project));
-    return typeOk && !project.archived && !project.projectResult && projectVisibleOnBoard(project);
-  });
-}
 
-function projectBoardThumbnailSource(value) {
-  const source = String(value || "").trim();
-  if (!source || !/\/assets\/king-cases\//i.test(source)) return source;
-  if (/\/assets\/king-cases\/_(?:thumbs|previews)\//i.test(source)) {
-    return normalizeLegacyDerivativePath(source);
-  }
-  return source
-    .replace(/\/assets\/king-cases\//i, "/assets/king-cases/_thumbs/")
-    .replace(/\.(?:jpe?g|png|tiff?)(?=([?#]|$))/i, ".webp");
-}
 
-function projectBoardThumbnailHtml(project) {
-  const image = projectFileEntries(project).find((file) => file.dataUrl && (String(file.type || "").startsWith("image/") || /\.(jpe?g|png)$/i.test(file.name || "")));
-  const thumbnailSource = projectBoardThumbnailSource(image?.dataUrl);
-  return image
-    ? `<span class="project-kanban-thumbnail"><img src="${escapeHtml(thumbnailSource)}" alt="${escapeHtml(project.name)} 项目缩略图" loading="lazy" decoding="async" fetchpriority="low" /></span>`
-    : `<span class="project-kanban-thumbnail empty" aria-label="暂无项目缩略图">无</span>`;
-}
 
-function projectAvatarHtml(project) {
-  const members = Array.isArray(project.members) ? project.members : String(project.members || "").split("、").filter(Boolean);
-  return `<div class="project-avatar-row">
-    ${members.slice(0, 2).map((name, index) => {
-      const member = teamMembers.find((item) => item.name === name) || { name, role: "设计师" };
-      return `<span class="project-mini-avatar ${index % 2 ? "hot" : ""}">${memberAvatarInner(member)}</span>`;
-    }).join("")}
-  </div>`;
-}
 
-function projectBoardCardHtml(project) {
-  const source = project.source || "custom";
-  const draggable = currentAccount.role === "管理员" ? "true" : "false";
-  const isClosed = project.status === "已关闭";
-  const projectId = project.id;
-  const canOpen = source === "custom" ? ` data-project-view="${escapeHtml(projectId)}"` : "";
-  const runtime = projectStatusDisplay(project);
-  const dateText = runtime.key === "normal" ? project.due || project.endAt || "未定" : runtime.label;
-  const customerText = project.customer === "内部图库 / 非客户项目" ? "非客户项目" : project.customer || project.owner || "未关联客户";
-  return `<article class="project-kanban-card project-status-${runtime.key} ${isClosed ? "project-closed" : ""}" draggable="${draggable}" data-board-project="${escapeHtml(projectId)}" data-project-source="${escapeHtml(source)}"${canOpen}>
-    <div class="project-kanban-head">
-      <strong>${escapeHtml(project.name)}</strong>
-      <time class="${runtime.key !== "normal" ? "project-state-date" : ""}">${escapeHtml(dateText)}</time>
-    </div>
-    <div class="project-kanban-meta"><span>${escapeHtml(projectTypeValue(project) === "内部" ? "内部项目" : projectTypeValue(project))}</span><em>·</em><span>负责人：${escapeHtml(project.owner || "未指定")}</span></div>
-    ${projectBoardThumbnailHtml(project)}
-    <div class="project-kanban-foot">
-      ${projectAvatarHtml(project)}
-      <small>客户：${escapeHtml(customerText)}</small>
-    </div>
-  </article>`;
-}
 
-function renderCustomProjects() {
-  if (!myProjectGrid) return;
-  const projects = mergedBoardProjects();
-  myProjectGrid.innerHTML = projectBoardStages
-    .map((stage) => {
-      const items = projects.filter((project) => normalizeProjectBoardStatus(project.status) === stage.status);
-      return `<section class="project-board-column" data-project-stage="${escapeHtml(stage.status)}">
-        <header>
-          <div><i style="background:${stage.color}"></i><strong>${escapeHtml(stage.status)}</strong><span>${items.length}</span></div>
-        </header>
-        <div class="project-board-list">
-          ${items.map(projectBoardCardHtml).join("") || `<button class="project-empty-column" type="button" data-project-empty-create="${escapeHtml(stage.status)}">新建项目</button>`}
-        </div>
-      </section>`;
-    })
-    .join("");
-  renderProjectArchiveCount();
-}
 
-function moveProjectToStage(payload, nextStatus) {
-  if (!payload?.id || !nextStatus) return;
-  if (payload.source === "custom") {
-    const project = customProjects.find((item) => item.id === payload.id);
-    if (!project) return;
-    if (project.projectStatus === "paused") {
-      showToast("暂停中的项目需要先恢复，才能调整阶段。", "warning");
-      return;
-    }
-    const previousStatus = projectStage(project);
-    if (previousStatus === nextStatus) return;
-    setProjectStage(project, nextStatus);
-    project.changeLogs = [
-      {
-        time: formatDateTime(),
-        user: currentAccount.name || currentAccount.role,
-        action: "拖拽调整阶段",
-        detail: `${previousStatus} → ${nextStatus}`,
-      },
-      ...(project.changeLogs || []),
-    ];
-  } else {
-    const project = defaultBoardProjects.find((item) => item.id === payload.id);
-    if (!project) return;
-    const previousStatus = normalizeProjectBoardStatus(projectBoardOverrides[payload.id] || project.status);
-    if (previousStatus === nextStatus) return;
-    projectBoardOverrides[payload.id] = nextStatus;
-  }
-  saveStudioState();
-  renderCustomProjects();
-  showToast(`项目已移动到「${nextStatus}」。`, "success");
-}
 
-function projectDropColumn(target) {
-  return target.closest(".project-board-column");
-}
 
 function editableOptions(kind) {
   if (kind === "project") {
@@ -1177,22 +1020,8 @@ function dateKey(value = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function validProjectDate(value) {
-  const text = String(value || "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
-  const [year, month, day] = text.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
-}
 
-function formatProjectDateInput(value) {
-  const digits = String(value || "").replace(/\D/g, "").slice(0, 8);
-  return [digits.slice(0, 4), digits.slice(4, 6), digits.slice(6, 8)].filter(Boolean).join("-");
-}
 
-function projectDateText(value) {
-  return validProjectDate(value) ? value : "未设置";
-}
 
 function displayDateLabel(key) {
   if (key === "all") return "全部日期";
@@ -1819,11 +1648,6 @@ function setImageKey(card, key) {
   if (key) card.dataset.imageKey = key;
 }
 
-function updateCardProject(card, projectName) {
-  const projectLine = card.querySelector(".work-body > p");
-  if (!projectLine) return;
-  projectLine.textContent = `项目：${projectName || "未关联项目"}`;
-}
 
 function updateCardLinkedPainter(card, linkedText) {
   const rows = [...card.querySelectorAll("dl div")];
@@ -2061,13 +1885,7 @@ function activeWorkCards() {
   return [...workCards].filter((card) => !card.classList.contains("deleted"));
 }
 
-function visibleProjectItems() {
-  return mergedBoardProjects().filter((project) => projectVisibleForCurrentAccount(project));
-}
 
-function activeProjectItems() {
-  return visibleProjectItems().filter((project) => !project.archived && !project.projectResult);
-}
 
 function relatedOrderItems() {
   return studioOrders.filter(orderBelongsToCurrentAccount);
@@ -2082,9 +1900,6 @@ function adminRiskData() {
   return { projects, orders };
 }
 
-function riskProjectPeople(project) {
-  return [project.owner, ...(project.designers || []), ...(project.painters || [])].filter(Boolean).join("、") || "待分配";
-}
 
 function renderRiskModal() {
   const { projects, orders } = adminRiskData();
@@ -2275,18 +2090,6 @@ function renderSalesDashboard() {
   }
 }
 
-function memberProjectItems(member) {
-  return customProjects.filter((project) => {
-    if (project.archived || project.projectResult) return false;
-    const members = [
-      project.owner,
-      ...(project.designers || []),
-      ...(project.painters || []),
-      ...(Array.isArray(project.members) ? project.members : String(project.members || "").split("、")),
-    ];
-    return members.some((name) => String(name || "").includes(member.name));
-  });
-}
 
 function memberOrderItems(member) {
   return studioOrders.filter((order) => {
@@ -2377,61 +2180,8 @@ function renderTeamView() {
   </table>`;
 }
 
-function closeTeamProjectsModal() {
-  teamProjectsModal?.classList.remove("active");
-  teamProjectsModal?.setAttribute("aria-hidden", "true");
-  lockBodyScroll(false);
-}
 
-function openTeamProjectsModal(memberKey) {
-  const member = teamMembers.find((item) => item.ownerKey === memberKey);
-  if (!member || !teamProjectsModal || !teamProjectsBody) return;
-  const stats = teamMemberStats(member);
-  const projects = stats.projects;
-  const resultCount = member.role === "设计师" ? stats.sold : stats.referenced;
-  const resultLabel = member.role === "设计师" ? "已出售" : "被引用";
-  const projectRows = projects.length
-    ? `<div class="team-project-list-head"><span>项目名称</span><span>类型</span><span>阶段</span><span>项目时间</span><span>客户</span></div>${projects.map((project) => `<button class="team-project-row" type="button" data-team-project-detail="${escapeHtml(project.id)}">
-        <strong>${escapeHtml(project.name)}</strong>
-        <span>${escapeHtml(projectTypeValue(project) === "内部" ? "内部项目" : `${projectTypeValue(project)}项目`)}</span>
-        <span>${escapeHtml(normalizeProjectBoardStatus(project.status))}</span>
-        <span>${escapeHtml(project.startAt || "未定")} — ${escapeHtml(project.endAt || "未定")}</span>
-        <span>${escapeHtml(project.customer || "非客户项目")}</span>
-      </button>`).join("")}`
-    : `<p class="team-projects-empty">暂无负责项目</p>`;
-  const orderRows = stats.orders.length
-    ? stats.orders.map((order) => `<div class="team-order-row"><strong>${escapeHtml(order.id || "订单")}</strong><span>${escapeHtml(order.customer || "未关联客户")}</span><small>${escapeHtml(orderProgressStatus(order))}</small></div>`).join("")
-    : `<p class="team-projects-empty compact">暂无关联订单</p>`;
-  teamProjectsTitle.textContent = `${member.name} · 成员详情`;
-  teamProjectsBody.innerHTML = `<div class="team-member-detail-summary">
-      <div><strong>${stats.works.length}</strong><span>作品</span></div>
-      <div><strong>${stats.pending}</strong><span>待审</span></div>
-      <div><strong>${stats.revision}</strong><span>需改</span></div>
-      <div><strong>${stats.sleeping}</strong><span>休眠</span></div>
-      <div><strong>${resultCount}</strong><span>${resultLabel}</span></div>
-      <div><strong>${stats.projects.length}</strong><span>项目</span></div>
-    </div>
-    <section class="team-member-related"><h3>负责项目</h3>${projectRows}</section>
-    <section class="team-member-related"><h3>关联订单</h3>${orderRows}</section>`;
-  teamProjectsModal.classList.add("active");
-  teamProjectsModal.setAttribute("aria-hidden", "false");
-  lockBodyScroll(true);
-}
 
-function syncProjectMemberOptions() {
-  const selectedDesigners = new Set(checkedMemberValues(projectDesignerOptions));
-  const selectedPainters = new Set(checkedMemberValues(projectPainterOptions));
-  const selectedOwners = new Set(checkedMemberValues(projectOwnerOptions));
-  const optionMarkup = (member, selected) => `<label><input type="checkbox" value="${escapeHtml(member.name)}" ${selected.has(member.name) ? "checked" : ""} /><span>${escapeHtml(member.name)}</span></label>`;
-  const enabledMembers = teamMembers.filter((member) => (member.accountStatus || "正常") === "正常");
-  if (projectDesignerOptions) projectDesignerOptions.innerHTML = enabledMembers.filter((member) => member.role === "设计师").map((member) => optionMarkup(member, selectedDesigners)).join("");
-  if (projectPainterOptions) projectPainterOptions.innerHTML = enabledMembers.filter((member) => member.role === "手绘师").map((member) => optionMarkup(member, selectedPainters)).join("");
-  if (projectOwnerOptions) {
-    const admin = { name: "管理员 / 总控" };
-    projectOwnerOptions.innerHTML = [admin, ...enabledMembers].map((member) => optionMarkup(member, selectedOwners)).join("");
-  }
-  updateProjectMemberSummaries();
-}
 
 function toggleMemberSearchEmpty(results, show) {
   if (!results) return;
@@ -2445,11 +2195,6 @@ function toggleMemberSearchEmpty(results, show) {
   empty?.classList.toggle("hidden", !show);
 }
 
-function projectOwnerNames(project) {
-  if (Array.isArray(project.owners)) return [...project.owners];
-  if (!project.owner || project.owner === "未指定") return [];
-  return String(project.owner).split("、").map((name) => name.trim()).filter(Boolean);
-}
 
 function leastLoadedReplacement(member) {
   return teamMembers
@@ -2779,7 +2524,7 @@ function anyOverlayOpen() {
     projectDetailModal?.classList.contains("active") ||
     projectFileViewer?.classList.contains("active") ||
     projectFileManager?.classList.contains("active") ||
-    painterPickerModal.classList.contains("active") ||
+    painterPickerModal?.classList.contains("active") ||
     document.getElementById("orderDetailOverlay")?.classList.contains("open") ||
     document.getElementById("payOverlay")?.classList.contains("open") ||
     document.getElementById("custPatternViewer")?.classList.contains("open") ||
@@ -2961,9 +2706,6 @@ function searchMatches(query, values) {
   return values.some((value) => searchForms(value).some((form) => form.includes(key)));
 }
 
-function workProjectName(card) {
-  return card?.querySelector(".work-body > p")?.textContent.replace(/^项目：/, "").trim() || "未关联项目";
-}
 
 function buildGlobalSearchMatches(query) {
   const key = normalizeSearch(query);
@@ -6400,12 +6142,6 @@ function selectFromDataSource({ anchor, options, currentValue, onSelect }) {
   });
 }
 
-function projectOptions() {
-  return projectLibrary.map((item) => ({
-    value: item.name,
-    label: `${item.name} / ${item.status}`,
-  }));
-}
 
 function painterWorkOptions() {
   return [
@@ -6480,7 +6216,7 @@ function openUploadModal() {
   linkedPainterSummary.textContent = "未关联";
   linkedPainterList.innerHTML = "";
   renderLinkedProjects();
-  projectSearch.value = "";
+  if (projectSearch) projectSearch.value = "";
   releaseFileURLs();
   fileReadout.innerHTML = emptyAddButtonMarkup("upload");
   referenceReadout.innerHTML = emptyAddButtonMarkup("reference");
@@ -6521,16 +6257,7 @@ function checkedMemberValues(container) {
   return [...(container?.querySelectorAll("input:checked") || [])].map((input) => input.value);
 }
 
-function projectMemberRoleLabel(role) {
-  return { designer: "设计师", painter: "手绘师", owner: "负责人", designers: "设计师", painters: "手绘师", owners: "负责人" }[role] || "成员";
-}
 
-function projectMemberCandidates(role) {
-  const enabled = teamMembers.filter((member) => (member.accountStatus || "正常") === "正常");
-  if (["designer", "designers"].includes(role)) return enabled.filter((member) => member.role === "设计师");
-  if (["painter", "painters"].includes(role)) return enabled.filter((member) => member.role === "手绘师");
-  return enabled;
-}
 
 function updateMemberSummary(container, summary, emptyText, role) {
   if (!summary) return;
@@ -6540,11 +6267,6 @@ function updateMemberSummary(container, summary, emptyText, role) {
     : `<em>${escapeHtml(emptyText)}</em>`}<button class="member-inline-add" type="button" data-open-member-picker="${role}">＋ 添加</button></div>`;
 }
 
-function updateProjectMemberSummaries() {
-  updateMemberSummary(projectDesignerOptions, projectDesignerSummary, "尚未选择", "designer");
-  updateMemberSummary(projectPainterOptions, projectPainterSummary, "尚未选择", "painter");
-  updateMemberSummary(projectOwnerOptions, projectOwnerSummary, "尚未选择", "owner");
-}
 
 function memberPickerSelectedValues(context = memberPickerContext) {
   if (!context) return [];
@@ -6626,514 +6348,45 @@ function setCheckedMemberValues(container, values) {
   });
 }
 
-function renderProjectStatusOptions() {
-  projectStatusOptions?.querySelectorAll("[data-project-status]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.projectStatus === selectedProjectStatus);
-  });
-}
 
-function renderProjectTypeOptions() {
-  projectTypeOptions?.querySelectorAll("[data-project-type]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.projectType === selectedProjectType);
-  });
-}
 
-function renderProjectNoteLog() {
-  if (!projectNoteLog) return;
-  if (!projectNoteLogs.length) {
-    if (projectNoteLog) projectNoteLog.textContent = "暂无备注日志。";
-    return;
-  }
-  if (projectNoteLog) projectNoteLog.innerHTML = projectNoteLogs
-    .map((item) => `<article><strong>${escapeHtml(item.time)}${item.user ? ` / ${escapeHtml(item.user)}` : ""}</strong><p>${escapeHtml(item.text)}</p></article>`)
-    .join("");
-}
 
-function addProjectNoteLog() {
-  const text = projectNoteInput.value.trim();
-  if (!text) {
-    showToast("请先填写备注内容。", "warning");
-    projectNoteInput.focus();
-    return false;
-  }
-  projectNoteLogs.unshift({ time: formatDateTime(), user: currentAccount.name, text });
-  projectNoteInput.value = "";
-  renderProjectNoteLog();
-  return true;
-}
 
-function renderProjectFileReadout() {
-  if (!projectFileReadout) return;
-  if (!selectedProjectFiles.length) {
-    projectFileReadout.innerHTML = "";
-    return;
-  }
-  projectFileReadout.innerHTML = selectedProjectFiles
-    .map((file, index) => `<article class="project-file-item">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"></path><path d="M14 3v5h5"></path></svg>
-      <span>${escapeHtml(projectStoredFileName(file))}</span>
-      <button type="button" data-remove-project-file="${index}" aria-label="删除 ${escapeHtml(projectStoredFileName(file))}">×</button>
-    </article>`)
-    .join("");
-}
 
-function projectFileIdentity(file) {
-  return `${projectStoredFileName(file)}:${file?.size || 0}:${file?.lastModified || file?.time || ""}`;
-}
 
-function mergeProjectFiles(existing, incoming) {
-  const keys = new Set(existing.map(projectFileIdentity));
-  const merged = [...existing, ...incoming.filter((file) => {
-    const key = projectFileIdentity(file);
-    if (keys.has(key)) return false;
-    keys.add(key);
-    return true;
-  })];
-  if (merged.length > MAX_UPLOAD_FILES) showToast("超过最大上传数量", "warning");
-  return merged.slice(0, MAX_UPLOAD_FILES);
-}
 
-function projectCustomerNames() {
-  return [...(projectCustomerSelect?.options || [])].map((option) => option.value).filter(Boolean);
-}
 
-function renderProjectCustomerOptions(keyword = projectCustomerInput?.value || "") {
-  if (!projectCustomerOptions) return;
-  const query = keyword.trim().toLowerCase();
-  if (!query) {
-    projectCustomerOptions.innerHTML = "";
-    projectCustomerCreateInline?.classList.add("hidden");
-    if (projectCustomerCreateInline) projectCustomerCreateInline.dataset.customerName = "";
-    setProjectCustomerOpen(false);
-    return;
-  }
-  const matches = projectCustomerNames().filter((name) => searchMatches(query, [name]));
-  const resultHtml = matches.map((name) => `<button type="button" data-project-customer="${escapeHtml(name)}" class="${projectCustomerInput.value === name ? "active" : ""}"><span>${escapeHtml(name)}</span>${projectCustomerInput.value === name ? '<i aria-hidden="true">✓</i>' : ""}</button>`).join("");
-  projectCustomerOptions.innerHTML = resultHtml;
-  projectCustomerCreateInline?.classList.toggle("hidden", Boolean(matches.length));
-  if (projectCustomerCreateInline) projectCustomerCreateInline.dataset.customerName = matches.length ? "" : keyword.trim();
-  setProjectCustomerOpen(Boolean(matches.length));
-}
 
-function setProjectCustomerOpen(open) {
-  projectCustomerCombobox?.classList.toggle("open", open);
-  projectCustomerInput?.setAttribute("aria-expanded", String(open));
-}
 
-function chooseProjectCustomer(name) {
-  projectCustomerInput.value = name;
-  if ([...projectCustomerSelect.options].some((option) => option.value === name)) projectCustomerSelect.value = name;
-  projectCustomerCreateInline?.classList.add("hidden");
-  setProjectCustomerOpen(false);
-}
 
-function createDefaultProjectCustomer(name) {
-  const cleanName = String(name || "").trim();
-  if (!cleanName) return;
-  if (!customCustomers.some((customer) => customer.name === cleanName)) {
-    customCustomers = [{
-      id: `CU-${Date.now()}`,
-      name: cleanName,
-      gender: "未说明",
-      company: "默认",
-      contact: "",
-      preferences: [],
-      demand: "",
-      createdAt: formatDateTime(),
-    }, ...customCustomers];
-    ensureCustomerOption(cleanName, false);
-    saveStudioState();
-  }
-  chooseProjectCustomer(cleanName);
-  showToast(`${cleanName} 已用默认资料加入客户库。`, "success");
-}
 
-function resetProjectMemberSearches() {
-  projectModal?.querySelectorAll("[data-member-search]").forEach((input) => { input.value = ""; });
-  projectModal?.querySelectorAll(".member-checkbox-grid label, .owner-option-list label").forEach((option) => { option.hidden = false; });
-  projectModal?.querySelectorAll(".project-member-results").forEach((results) => {
-    results.classList.remove("open");
-    toggleMemberSearchEmpty(results, false);
-  });
-}
 
-function resetProjectModal() {
-  selectedProjectFiles = [];
-  selectedProjectStatus = "需求确认";
-  selectedProjectType = "定制";
-  projectNoteLogs = [];
-  editingProjectId = null;
-  projectModalTitle.textContent = "新建项目";
-  projectConfirm.textContent = "确认";
-  projectNameInput.value = "";
-  projectFilesInput.value = "";
-  projectCustomerSelect.value = "非客户项目";
-  projectCustomerInput.value = "";
-  setProjectCustomerOpen(false);
-  projectNoteInput.value = "";
-  projectStartDate.value = "";
-  projectEndDate.value = "";
-  projectDesignerOptions?.querySelectorAll("input").forEach((input) => {
-    input.checked = false;
-  });
-  projectPainterOptions?.querySelectorAll("input").forEach((input) => {
-    input.checked = false;
-  });
-  projectOwnerOptions?.querySelectorAll("input").forEach((input) => {
-    input.checked = false;
-  });
-  renderProjectFileReadout();
-  updateProjectMemberSummaries();
-  renderProjectStatusOptions();
-  renderProjectTypeOptions();
-  renderProjectNoteLog();
-  resetProjectMemberSearches();
-  clearProjectValidation();
-}
 
-function fillProjectModal(project) {
-  editingProjectId = project.id;
-  selectedProjectFiles = [...(project.files || [])];
-  selectedProjectStatus = normalizeProjectBoardStatus(project.status || "需求确认");
-  selectedProjectType = projectTypeValue(project);
-  projectNoteLogs = [...(project.logs || [])];
-  projectModalTitle.textContent = "修改项目";
-  projectConfirm.textContent = "保存修改";
-  projectNameInput.value = project.name || "";
-  projectFilesInput.value = "";
-  projectCustomerSelect.value = project.customer === "内部图库 / 非客户项目" ? "非客户项目" : project.customer || "非客户项目";
-  projectCustomerInput.value = projectCustomerSelect.value;
-  setProjectCustomerOpen(false);
-  projectNoteInput.value = "";
-  projectStartDate.value = project.startAt || "";
-  projectEndDate.value = project.endAt || "";
-  setCheckedMemberValues(projectDesignerOptions, project.designers || []);
-  setCheckedMemberValues(projectPainterOptions, project.painters || []);
-  setCheckedMemberValues(projectOwnerOptions, project.owners || (project.owner && project.owner !== "未指定" ? String(project.owner).split("、").filter(Boolean) : []));
-  renderProjectFileReadout();
-  updateProjectMemberSummaries();
-  renderProjectStatusOptions();
-  renderProjectTypeOptions();
-  renderProjectNoteLog();
-  resetProjectMemberSearches();
-  clearProjectValidation();
-}
 
-function openProjectCreateModal() {
-  resetProjectModal();
-  projectModal.classList.add("active");
-  projectModal.setAttribute("aria-hidden", "false");
-  lockBodyScroll(true);
-  projectNameInput.focus();
-}
 
-function openProjectEditModal(projectId) {
-  if (currentAccount.role !== "管理员") return;
-  const project = customProjects.find((item) => item.id === projectId);
-  if (!project) return;
-  fillProjectModal(project);
-  projectModal.classList.add("active");
-  projectModal.setAttribute("aria-hidden", "false");
-  lockBodyScroll(true);
-  projectNameInput.focus();
-}
 
-function closeProjectCreateModal() {
-  projectModal.classList.remove("active");
-  projectModal.setAttribute("aria-hidden", "true");
-  lockBodyScroll(false);
-}
 
-function requestCloseProjectCreateModal() {
-  const hasDraft = editingProjectId || projectNameInput.value.trim() || selectedProjectFiles.length || projectStartDate.value || projectEndDate.value || projectNoteInput.value.trim() || checkedMemberValues(projectDesignerOptions).length || checkedMemberValues(projectPainterOptions).length || checkedMemberValues(projectOwnerOptions).length;
-  if (hasDraft) {
-    // Editing a real project keeps the old two-button discard flow.
-    if (editingProjectId) {
-      openExitConfirmation({
-        title: "放弃项目修改？",
-        message: "退出后，本次填写的项目资料、类别、人员和时间设置都不会保留。",
-        onConfirm: closeProjectCreateModal,
-      });
-      return;
-    }
-    // New-project drafting: exiting must not delete an existing draft.
-    openExitConfirmation({
-      title: "尚未保存",
-      message: "当前修改尚未保存，是否保存后退出？",
-      submitText: "不保存并退出",
-      cancelText: "取消",
-      saveText: "保存并退出",
-      onConfirm: closeProjectCreateModal,
-      onSave: () => {
-        saveCreateProjectDraft().catch((error) => {
-          console.error(error);
-          showToast("草稿保存失败，请重试。", "error");
-        });
-      },
-    });
-    return;
-  }
-  closeProjectCreateModal();
-}
 
 function isBrowserFile(file) {
   return typeof File !== "undefined" && file instanceof File;
 }
 
-async function serializeProjectFiles(files, uploadedAt, previousCreatedAt) {
-  const stored = [];
-  for (const file of files || []) {
-    if (!file) continue;
-    if (isBrowserFile(file)) {
-      const key = `project_file_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-      await saveImageToDB(key, file);
-      stored.push({
-        name: file.name,
-        type: file.type || "",
-        size: file.size || 0,
-        time: uploadedAt,
-        uploader: currentAccount.name,
-        key,
-        dataUrl: "",
-      });
-    } else if (typeof file === "string") {
-      stored.push({
-        name: file,
-        type: "",
-        size: 0,
-        time: previousCreatedAt || uploadedAt,
-        uploader: "项目资料",
-        dataUrl: "",
-      });
-    } else {
-      stored.push({
-        name: file.name || "项目资料",
-        type: file.type || "",
-        size: file.size || 0,
-        time: file.time || previousCreatedAt || uploadedAt,
-        uploader: file.uploader || "项目资料",
-        key: file.key || "",
-        dataUrl: file.dataUrl || "",
-      });
-    }
-  }
-  return stored;
-}
 
-function clearProjectValidation() {
-  projectModal?.querySelectorAll(".project-field-invalid").forEach((field) => field.classList.remove("project-field-invalid"));
-  if (projectValidationSummary) projectValidationSummary.innerHTML = "";
-  projectValidationSummary?.classList.add("hidden");
-}
 
-function showProjectValidation(errors) {
-  clearProjectValidation();
-  if (!projectValidationSummary) return;
-  errors.forEach((item) => projectModal.querySelector(item.selector)?.classList.add("project-field-invalid"));
-  projectValidationSummary.innerHTML = errors.map((item) => `<button type="button" data-project-validation-target="${escapeHtml(item.selector)}"><span>${escapeHtml(item.message)}</span><b aria-hidden="true">↑</b></button>`).join("");
-  projectValidationSummary.classList.toggle("hidden", !errors.length);
-}
 
-async function createProjectFromModal() {
-  const name = projectNameInput.value.trim();
-  const designers = checkedMemberValues(projectDesignerOptions);
-  const painters = checkedMemberValues(projectPainterOptions);
-  const owners = checkedMemberValues(projectOwnerOptions);
-  const owner = owners.join("、") || "未指定";
-  const validationErrors = [];
-  if (!name) validationErrors.push({ selector: ".project-name-field", message: "请填写项目名称" });
-  if (!validProjectDate(projectStartDate.value) || !validProjectDate(projectEndDate.value)) validationErrors.push({ selector: ".project-time-field", message: "项目时间有缺失或有误" });
-  if (validationErrors.length) {
-    showProjectValidation(validationErrors);
-    return;
-  }
-  clearProjectValidation();
-  const pendingNote = projectNoteInput.value.trim();
-  const logs = pendingNote ? [{ time: formatDateTime(), user: currentAccount.name, text: pendingNote }, ...projectNoteLogs] : projectNoteLogs;
-  const members = [...new Set([...designers, ...painters, ...owners])].join("、");
-  const previous = editingProjectId ? customProjects.find((item) => item.id === editingProjectId) : null;
-  const now = formatDateTime();
-  const storedFiles = await serializeProjectFiles(selectedProjectFiles, now, previous?.createdAt);
-  const project = {
-    ...(previous || {}),
-    id: previous?.id || `PJ-${Date.now()}`,
-    name,
-    customer: projectCustomerInput.value.trim() || projectCustomerSelect.value || "非客户项目",
-    type: selectedProjectType,
-    status: selectedProjectStatus,
-    stage: selectedProjectStatus,
-    projectStatus: previous?.projectStatus || "normal",
-    projectResult: previous?.projectResult || null,
-    archived: previous?.archived || false,
-    files: storedFiles,
-    designers,
-    painters,
-    owners,
-    owner,
-    members,
-    startAt: projectStartDate.value,
-    endAt: projectEndDate.value,
-    note: logs[0]?.text || "",
-    logs,
-    createdAt: previous?.createdAt || now,
-    createdBy: previous?.createdBy || currentAccountDisplayName() || currentAccount.name || "",
-    uploads: previous?.uploads || [],
-    deliveryStatus: previous?.deliveryStatus || "pending",
-    deliveryFiles: previous?.deliveryFiles || [],
-    deliveryNote: previous?.deliveryNote || "",
-    deliveryReceiver: previous?.deliveryReceiver || "",
-    deliveryVersion: previous?.deliveryVersion || "",
-    archiveHistory: previous?.archiveHistory || [],
-  };
-  normalizeProjectLifecycleProject(project);
-  project.changeLogs = [...projectChangeLogEntries(previous, project, now), ...(previous?.changeLogs || [])];
-  customProjects = [project, ...customProjects.filter((item) => item.id !== project.id && item.name !== name)];
-  syncProjectLibrary();
-  saveStudioState();
-  if (editingDraftId) {
-    projectDrafts = projectDrafts.filter((draft) => draft.id !== editingDraftId);
-    editingDraftId = "";
-    saveProjectDrafts();
-  }
-  renderCustomProjects();
-  closeProjectCreateModal();
-  if (!previous && typeof switchView === "function") switchView("projects");
-  showToast(previous ? `${name} 已保存修改。` : `${name} 已创建，已进入项目流程页。`, "success");
-}
 
-function loadProjectDrafts() {
-  try {
-    projectDrafts = JSON.parse(localStorage.getItem(PROJECT_DRAFT_KEY) || "[]");
-  } catch {
-    projectDrafts = [];
-  }
-  renderProjectDrafts();
-}
 
-function saveProjectDrafts() {
-  localStorage.setItem(PROJECT_DRAFT_KEY, JSON.stringify(projectDrafts));
-  renderProjectDrafts();
-}
 
-async function saveCreateProjectDraft() {
-  const now = formatDateTime();
-  const files = await serializeProjectFiles(selectedProjectFiles, now, now);
-  const draft = {
-    id: editingDraftId || `PD-${Date.now()}`,
-    kind: "create",
-    savedAt: now,
-    name: projectNameInput.value.trim(),
-    customer: projectCustomerInput.value.trim(),
-    type: selectedProjectType,
-    status: selectedProjectStatus,
-    files,
-    designers: checkedMemberValues(projectDesignerOptions),
-    painters: checkedMemberValues(projectPainterOptions),
-    owners: checkedMemberValues(projectOwnerOptions),
-    startAt: projectStartDate.value,
-    endAt: projectEndDate.value,
-    note: projectNoteInput.value,
-  };
-  projectDrafts = [draft, ...projectDrafts.filter((item) => item.id !== draft.id)];
-  editingDraftId = draft.id;
-  saveProjectDrafts();
-  closeProjectCreateModal();
-  showToast("项目已存入草稿箱。", "success");
-}
 
-function saveProjectDetailDraft(projectId) {
-  const project = customProjects.find((item) => item.id === projectId);
-  if (!project) return;
-  const draft = {
-    id: `PD-EDIT-${projectId}`,
-    kind: "edit",
-    projectId,
-    savedAt: formatDateTime(),
-    name: projectDetailTitle.value.trim(),
-    customer: projectDetailBody.querySelector('[data-project-detail-field="customer"]')?.value.trim() || "",
-    type: projectDetailBody.querySelector("[data-project-detail-type-option].active")?.dataset.projectDetailTypeOption || projectTypeValue(project),
-    status: projectDetailBody.querySelector("[data-project-detail-status-option].active")?.dataset.projectDetailStatusOption || projectStage(project),
-    startAt: projectDetailBody.querySelector('[data-project-detail-field="startAt"]')?.value || "",
-    endAt: projectDetailBody.querySelector('[data-project-detail-field="endAt"]')?.value || "",
-    designers: projectDetailSelectedMembers("designers"),
-    painters: projectDetailSelectedMembers("painters"),
-    owners: projectDetailSelectedMembers("owners"),
-  };
-  projectDrafts = [draft, ...projectDrafts.filter((item) => item.id !== draft.id)];
-  saveProjectDrafts();
-  closeProjectDetailModal();
-  showToast("项目修改已存入草稿箱，尚未写入正式项目。", "success");
-}
 
-function renderProjectDrafts() {
-  if (projectDraftCount) if (projectDraftCount) projectDraftCount.textContent = String(projectDrafts.length);
-  if (!projectDraftList) return;
-  projectDraftList.innerHTML = projectDrafts.length ? projectDrafts.map((draft) => `<article class="project-draft-row">
-    <button type="button" data-project-draft-open="${escapeHtml(draft.id)}"><strong>${escapeHtml(draft.name || "未命名项目")}</strong><span>${draft.kind === "edit" ? "项目修改" : "新建项目"} · ${escapeHtml(draft.savedAt || "")}</span></button>
-    <button class="project-draft-delete" type="button" data-project-draft-delete="${escapeHtml(draft.id)}">删除</button>
-  </article>`).join("") : `<p class="empty-state">暂无项目草稿。</p>`;
-}
 
-function openProjectDraftBox() {
-  renderProjectDrafts();
-  projectDraftModal.classList.add("active");
-  projectDraftModal.setAttribute("aria-hidden", "false");
-  lockBodyScroll(true);
-}
 
-function closeProjectDraftBox() {
-  projectDraftModal.classList.remove("active");
-  projectDraftModal.setAttribute("aria-hidden", "true");
-  lockBodyScroll(false);
-}
 
-function restoreProjectDraft(draftId) {
-  const draft = projectDrafts.find((item) => item.id === draftId);
-  if (!draft) return;
-  closeProjectDraftBox();
-  if (draft.kind === "edit") {
-    openProjectDetail(draft.projectId);
-    projectDetailTitle.value = draft.name || "";
-    const customer = projectDetailBody.querySelector('[data-project-detail-field="customer"]');
-    if (customer) customer.value = draft.customer || "";
-    const start = projectDetailBody.querySelector('[data-project-detail-field="startAt"]');
-    const end = projectDetailBody.querySelector('[data-project-detail-field="endAt"]');
-    if (start) start.value = draft.startAt || "";
-    if (end) end.value = draft.endAt || "";
-    projectDetailBody.querySelectorAll("[data-project-detail-type-option]").forEach((button) => button.classList.toggle("active", button.dataset.projectDetailTypeOption === draft.type));
-    projectDetailBody.querySelectorAll("[data-project-detail-status-option]").forEach((button) => button.classList.toggle("active", button.dataset.projectDetailStatusOption === draft.status));
-    [["designers", draft.designers], ["painters", draft.painters], ["owners", draft.owners]].forEach(([role, names]) => {
-      projectDetailBody.querySelectorAll(`[data-project-detail-member-option="${role}"]`).forEach((button) => button.classList.toggle("active", (names || []).includes(button.dataset.value)));
-      renderProjectDetailMemberSelection(projectDetailBody.querySelector(`[data-project-detail-member-picker="${role}"]`));
-    });
-    return;
-  }
-  openProjectCreateModal();
-  editingDraftId = draft.id;
-  projectNameInput.value = draft.name || "";
-  projectCustomerInput.value = draft.customer || "";
-  selectedProjectType = draft.type || "定制";
-  selectedProjectStatus = draft.status || "需求确认";
-  selectedProjectFiles = [...(draft.files || [])];
-  projectStartDate.value = draft.startAt || "";
-  projectEndDate.value = draft.endAt || "";
-  projectNoteInput.value = draft.note || "";
-  setCheckedMemberValues(projectDesignerOptions, draft.designers || []);
-  setCheckedMemberValues(projectPainterOptions, draft.painters || []);
-  setCheckedMemberValues(projectOwnerOptions, draft.owners || []);
-  renderProjectFileReadout();
-  updateProjectMemberSummaries();
-  renderProjectTypeOptions();
-  renderProjectStatusOptions();
-}
 
 function arrayText(items) {
   return (items || []).filter(Boolean).join("、") || "未设置";
 }
 
-function projectStoredFileName(item) {
-  return typeof item === "string" ? item : item?.name || "";
-}
 
 function fileNameText(items) {
   return (items || []).map(projectStoredFileName).filter(Boolean).join("、") || "无";
@@ -7143,405 +6396,33 @@ function logKey(item) {
   return `${item.time || ""}|${item.text || ""}`;
 }
 
-function projectChangeLogEntries(previous, next, time) {
-  const user = currentAccount.name;
-  if (!previous) {
-    return [{ time, user, action: "创建项目", detail: "项目资料已建立。" }];
-  }
-
-  const changes = [];
-  const pushChange = (label, before, after) => {
-    if (String(before || "") === String(after || "")) return;
-    changes.push(`${label}：${before || "未设置"} → ${after || "未设置"}`);
-  };
-
-  pushChange("项目名称", previous.name, next.name);
-  pushChange("客户", previous.customer, next.customer);
-  pushChange("项目类别", projectTypeValue(previous), projectTypeValue(next));
-  pushChange("项目状态", previous.status, next.status);
-  pushChange("负责人", previous.owner, next.owner);
-  pushChange("开始时间", previous.startAt, next.startAt);
-  pushChange("结束时间", previous.endAt, next.endAt);
-  pushChange("参与设计师", arrayText(previous.designers), arrayText(next.designers));
-  pushChange("参与手绘师", arrayText(previous.painters), arrayText(next.painters));
-
-  const previousFiles = new Set((previous.files || []).map(projectStoredFileName).filter(Boolean));
-  const nextFiles = new Set((next.files || []).map(projectStoredFileName).filter(Boolean));
-  const addedFiles = [...nextFiles].filter((file) => !previousFiles.has(file));
-  const removedFiles = [...previousFiles].filter((file) => !nextFiles.has(file));
-  if (addedFiles.length) changes.push(`新增项目资料：${fileNameText(addedFiles)}`);
-  if (removedFiles.length) changes.push(`移除项目资料：${fileNameText(removedFiles)}`);
-
-  const previousLogKeys = new Set((previous.logs || []).map(logKey));
-  const addedNotes = (next.logs || []).filter((item) => !previousLogKeys.has(logKey(item)));
-  if (addedNotes.length) changes.push(`新增备注：${addedNotes.map((item) => item.text).join("；")}`);
-
-  return changes.length ? [{ time, user, action: "修改项目", detail: changes.join("；") }] : [];
-}
 
 function fileExtension(name) {
   const ext = String(name || "").split(".").pop();
   return ext && ext !== name ? ext.toUpperCase() : "FILE";
 }
 
-function projectFileEntries(project) {
-  const initialFiles = (project.files || []).map((item, index) => {
-    const file = typeof item === "string" ? { name: item } : item || {};
-    return {
-      id: `initial-${index}`,
-      entryId: `initial-${index}`,
-      sourceType: "initial",
-      sourceIndex: index,
-      name: file.name || "项目资料",
-      type: file.type || "",
-      size: file.size || 0,
-      time: file.time || project.createdAt || "",
-      uploader: file.uploader || "项目资料",
-      source: "立项资料",
-      key: file.key || "",
-      dataUrl: file.dataUrl || "",
-    };
-  });
-  const uploads = (project.uploads || []).map((item, index) => ({
-    id: `upload-${index}`,
-    entryId: `upload-${index}`,
-    sourceType: "upload",
-    sourceIndex: index,
-    source: "上传文件",
-    ...item,
-  }));
-  return [...initialFiles, ...uploads];
-}
 
-function projectFileTileHtml(file, index, mode = "detail") {
-  const isImage = Boolean(file.dataUrl) && (String(file.type || "").startsWith("image/") || /\.(jpe?g|png)$/i.test(file.name || ""));
-  const preview = isImage
-    ? `<span class="project-file-thumb" style="background-image:url('${file.dataUrl}')"></span>`
-    : `<span class="project-file-thumb file-icon">${escapeHtml(fileExtension(file.name))}</span>`;
-  const draggable = mode === "manager" ? ` draggable="true" data-project-file-entry="${escapeHtml(file.entryId)}"` : "";
-  return `<article class="project-file-tile ${isImage ? "is-image" : ""}"${draggable}>
-    <button class="project-file-preview-button" type="button" data-project-file-index="${index}">${preview}<strong>${escapeHtml(file.name)}</strong></button>
-    <button class="project-file-download-mini" type="button" data-project-file-download-index="${index}">下载</button>
-  </article>`;
-}
 
-function projectFolderHtml(project) {
-  const files = projectFileEntries(project);
-  const uploadButton = projectParticipantCanUpload(project) && !project.archived
-    ? `<button class="primary-button project-upload-button" type="button" data-project-upload="${escapeHtml(project.id)}">上传文件</button>`
-    : "";
-  return `<div class="project-folder-head">
-      <div><h3>项目文件</h3></div>
-      ${uploadButton}
-    </div>
-    <div class="project-folder-window" data-project-folder-window="${escapeHtml(project.id)}">
-      ${files.length ? files.map(projectFileTileHtml).join("") : `<p class="project-empty-file">无文件</p>`}
-    </div>`;
-}
 
-function renderProjectLogItems(items, emptyText, options = {}) {
-  const visibleItems = (items || []).filter((item) => !String(item.text || "").startsWith("拖拽到"));
-  if (!visibleItems.length) return `<p class="empty-state compact">${escapeHtml(emptyText)}</p>`;
-  const shownItems = options.limit && !options.expanded ? visibleItems.slice(0, options.limit) : visibleItems;
-  const hint = options.limit && visibleItems.length > options.limit
-    ? `<p class="project-log-expand-hint">${options.expanded ? "双击收起最近 3 条" : `双击展开全部 ${visibleItems.length} 条记录`}</p>`
-    : "";
-  return shownItems
-    .map((item) => `<article>
-      <strong>${escapeHtml(item.time || "-")} ${item.user ? `/ ${escapeHtml(item.user)}` : ""}</strong>
-      <p>${escapeHtml(item.action ? `${item.action}：${item.detail || ""}` : item.text || item.detail || "")}</p>
-    </article>`)
-    .join("") + hint;
-}
 
-function projectDetailTopHtml(project) {
-  if (!project) return "";
-  const adminActions = currentAccount.role === "管理员"
-    ? `<span class="project-detail-top-actions">
-        <button class="project-save-draft detail" type="button" data-project-detail-draft="${escapeHtml(project.id)}">存入草稿箱</button>
-        <button class="primary-button" type="button" data-project-detail-save="${escapeHtml(project.id)}">确认修改项目</button>
-      </span>`
-    : "";
-  return adminActions;
-}
 
-function updateProjectDetailTop(project) {
-  if (projectDetailTopStatus) projectDetailTopStatus.innerHTML = projectDetailTopHtml(project);
-}
 
-function projectLifecyclePanelHtml(project) {
-  const stage = projectStage(project);
-  const runtime = projectStatusDisplay(project);
-  const manageable = canManageProjectLifecycle(project);
-  const action = (key, label, tone = "") => `<button class="${tone}" type="button" data-project-lifecycle-action="${key}" data-project-id="${escapeHtml(project.id)}">${label}</button>`;
-  const actions = [];
-  if (manageable) {
-    if (project.projectStatus === "paused") {
-      actions.push(action("resume", "恢复项目", "primary"));
-      actions.push(action("deadline", "修改截止日期"));
-      actions.push(action("terminate", "终止项目", "danger"));
-    } else if (stage === "内部定稿") {
-      actions.push(action("complete", "完成并归档", "primary"));
-      actions.push(action("back-revision", "退回修改完善"));
-      actions.push(action("deadline", "修改截止日期"));
-      actions.push(action("terminate", "终止项目", "danger"));
-    } else {
-      actions.push(action("pause", "暂停项目"));
-      actions.push(action("deadline", "修改截止日期"));
-      if (["需求确认", "概念方案"].includes(stage)) actions.push(action("cancel", "取消项目", "danger"));
-      if (["概念方案", "设计制作", "稿件评审", "修改完善"].includes(stage)) actions.push(action("terminate", "终止项目", "danger"));
-    }
-  }
-  return `<section class="project-lifecycle-panel">
-    <div class="project-lifecycle-state">
-      <span>当前阶段 <strong>${escapeHtml(stage)}</strong></span>
-      <span class="project-runtime-status ${runtime.key}">${escapeHtml(runtime.label)}</span>
-    </div>
-    ${actions.length ? `<div class="project-lifecycle-actions">${actions.join("")}</div>` : ""}
-  </section>`;
-}
 
-function projectDetailHtml(project) {
-  const customerText = project.customer === "内部图库 / 非客户项目" ? "非客户项目" : project.customer || "未关联客户";
-  const enabledMembers = teamMembers.filter((member) => (member.accountStatus || "正常") === "正常");
-  const ownerNames = ["管理员 / 总控", ...enabledMembers.map((member) => member.name)];
-  const designerNames = enabledMembers.filter((member) => member.role === "设计师").map((member) => member.name);
-  const painterNames = enabledMembers.filter((member) => member.role === "手绘师").map((member) => member.name);
-  const searchOptions = (names, key) => names.map((name) => `<button type="button" data-project-detail-search-option="${key}" data-value="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join("");
-  const selectedMemberMarkup = (selected, role) => (selected || []).length
-    ? selected.map((name) => `<span>${escapeHtml(name)}<button type="button" data-project-detail-member-remove="${role}" data-value="${escapeHtml(name)}" aria-label="删除 ${escapeHtml(name)}">×</button></span>`).join("")
-    : "<em>尚未选择</em>";
-  const memberPicker = (title, names, selected, role) => `<div class="project-detail-member-picker" data-project-detail-member-picker="${role}">
-    <h3>${title}</h3>
-    <div class="project-member-selected"><div class="project-member-summary-chips">${selectedMemberMarkup(selected, role)}<button class="member-inline-add" type="button" data-open-detail-member-picker="${role}">＋ 添加</button></div></div>
-    <div class="detail-search-results member-picker-state-store">${names.map((name) => `<button class="${(selected || []).includes(name) ? "active" : ""}" type="button" data-project-detail-member-option="${role}" data-value="${escapeHtml(name)}">${escapeHtml(name)}<i aria-hidden="true">✓</i></button>`).join("")}</div>
-  </div>`;
-  return `${projectLifecyclePanelHtml(project)}
-  <div class="project-detail-summary project-detail-fields">
-    <section class="project-detail-edit-field detail-search-combobox" data-project-detail-search="customer"><b>客户</b><div class="detail-search-control"><input data-project-detail-field="customer" value="${escapeHtml(customerText)}" placeholder="输入名称搜索客户" autocomplete="off" /><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></div><div class="detail-search-results">${searchOptions([...new Set([...projectCustomerNames(), customerText])], "customer")}</div></section>
-    <section class="project-detail-type-field"><b>项目类别</b><div class="project-type-options" data-project-detail-type>${["选稿", "定制", "内部"].map((type) => `<button class="${projectTypeValue(project) === type ? "active" : ""}" type="button" data-project-detail-type-option="${type}">${type === "内部" ? "内部项目" : type}</button>`).join("")}</div></section>
-    <section class="project-detail-status-field"><b>项目阶段</b><div class="project-status-options" data-project-detail-status>${projectBoardStages.map((item) => `<button class="${projectStage(project) === item.status ? "active" : ""}" type="button" data-project-detail-status-option="${escapeHtml(item.status)}">${escapeHtml(item.status)}</button>`).join("")}</div></section>
-    <section class="project-time-card"><b>项目时间</b>
-      <div class="project-time-strip">
-        <label><i>开始</i><input type="date" min="1000-01-01" max="9999-12-31" value="${escapeHtml(validProjectDate(project.startAt) ? project.startAt : "")}" data-project-detail-field="startAt" /></label>
-        <label><i>结束</i><input type="date" min="1000-01-01" max="9999-12-31" value="${escapeHtml(validProjectDate(project.endAt) ? project.endAt : "")}" data-project-detail-field="endAt" /></label>
-      </div>
-    </section>
-  </div>
-  <section class="project-detail-section project-detail-plain-section">
-    ${projectFolderHtml(project)}
-  </section>
-  <section class="project-detail-section project-detail-plain-section three-col">
-    ${memberPicker("参与设计师", designerNames, project.designers, "designers")}
-    ${memberPicker("参与手绘师", painterNames, project.painters, "painters")}
-    ${memberPicker("负责人", ownerNames, project.owners || (project.owner && project.owner !== "未指定" ? String(project.owner).split("、").filter(Boolean) : []), "owners")}
-  </section>
-  <section class="project-detail-section project-detail-plain-section project-change-log-section" data-project-change-log="true">
-    <h3>项目修改日志</h3>
-    <div class="project-note-log detail-log">${renderProjectLogItems(project.changeLogs, "暂无修改记录。", { limit: 3, expanded: projectChangeLogExpanded })}</div>
-  </section>`;
-}
 
-function openProjectDetail(projectId) {
-  const project = customProjects.find((item) => item.id === projectId);
-  if (!project) return;
-  activeProjectId = projectId;
-  projectChangeLogExpanded = false;
-  projectDetailTitle.value = project.name || "项目详情";
-  updateProjectDetailTop(project);
-  projectDetailBody.innerHTML = projectDetailHtml(project);
-  projectDetailModal.classList.add("active");
-  projectDetailModal.setAttribute("aria-hidden", "false");
-  lockBodyScroll(true);
-  projectDetailDirty = false;
-}
 
-// 在项目详情里做了未保存的修改后，退出时提示存草稿。
-function requestCloseProjectDetailModal() {
-  if (!projectDetailDirty) {
-    closeProjectDetailModal();
-    return;
-  }
-  const projectId = activeProjectId;
-  openExitConfirmation({
-    title: "尚未保存",
-    message: "当前项目修改尚未保存，是否保存后退出？",
-    submitText: "不保存并退出",
-    cancelText: "取消",
-    saveText: "保存并退出",
-    onConfirm: closeProjectDetailModal,
-    onSave: () => saveProjectDetailDraft(projectId),
-  });
-}
 
-function closeProjectDetailModal() {
-  projectDetailModal.classList.remove("active");
-  projectDetailModal.setAttribute("aria-hidden", "true");
-  updateProjectDetailTop(null);
-  activeProjectId = null;
-  projectChangeLogExpanded = false;
-  projectDetailDirty = false;
-  lockBodyScroll(false);
-}
 
-function deleteProject(projectId) {
-  if (currentAccount.role !== "管理员") return;
-  const project = customProjects.find((item) => item.id === projectId);
-  if (!project) return;
-  openExitConfirmation({
-    title: `删除项目「${project.name}」？`,
-    message: "删除后，该项目会从项目看板和关联项目选项中移除，此操作不能在当前原型中撤销。",
-    submitText: "确认删除",
-    onConfirm: () => {
-      customProjects = customProjects.filter((item) => item.id !== projectId);
-      syncProjectLibrary();
-      saveStudioState();
-      closeProjectDetailModal();
-      renderCustomProjects();
-      renderDashboardOverview(currentAccount.role);
-      showToast(`${project.name} 已删除。`, "warning");
-    },
-  });
-}
 
-function activeProject() {
-  return customProjects.find((item) => item.id === activeProjectId);
-}
 
-function refreshProjectDetail(project) {
-  if (!project || !projectDetailModal.classList.contains("active")) return;
-  projectDetailTitle.value = project.name || "项目详情";
-  updateProjectDetailTop(project);
-  projectDetailBody.innerHTML = projectDetailHtml(project);
-}
 
-function projectDetailSelectedMembers(role) {
-  return [...projectDetailBody.querySelectorAll(`[data-project-detail-member-option="${role}"].active`)].map((button) => button.dataset.value);
-}
 
-function renderProjectDetailMemberSelection(picker) {
-  if (!picker) return;
-  const role = picker.dataset.projectDetailMemberPicker;
-  const selected = [...picker.querySelectorAll(`[data-project-detail-member-option="${role}"].active`)].map((button) => button.dataset.value);
-  picker.querySelector(".project-member-selected").innerHTML = `<div class="project-member-summary-chips">${selected.length
-    ? selected.map((name) => `<span>${escapeHtml(name)}<button type="button" data-project-detail-member-remove="${role}" data-value="${escapeHtml(name)}" aria-label="删除 ${escapeHtml(name)}">×</button></span>`).join("")
-    : "<em>尚未选择</em>"}<button class="member-inline-add" type="button" data-open-detail-member-picker="${role}">＋ 添加</button></div>`;
-}
 
-function saveProjectDetailChanges(projectId) {
-  const project = customProjects.find((item) => item.id === projectId);
-  if (!project || currentAccount.role !== "管理员") return;
-  const customer = projectDetailBody.querySelector('[data-project-detail-field="customer"]')?.value.trim() || "非客户项目";
-  const owners = projectDetailSelectedMembers("owners");
-  const owner = owners.join("、") || "未指定";
-  const name = projectDetailTitle.value.trim();
-  const startAt = projectDetailBody.querySelector('[data-project-detail-field="startAt"]')?.value.trim() || "";
-  const endAt = projectDetailBody.querySelector('[data-project-detail-field="endAt"]')?.value.trim() || "";
-  if (!name) {
-    showToast("请填写项目名称。", "warning");
-    projectDetailTitle.focus();
-    return;
-  }
-  if (!validProjectDate(startAt) || !validProjectDate(endAt)) {
-    showToast("项目时间有缺失或有误。", "warning");
-    return;
-  }
-  const activeType = projectDetailBody.querySelector("[data-project-detail-type-option].active")?.dataset.projectDetailTypeOption || projectTypeValue(project);
-  const activeStatus = projectDetailBody.querySelector("[data-project-detail-status-option].active")?.dataset.projectDetailStatusOption || projectStage(project);
-  const previous = {
-    ...project,
-    designers: [...(project.designers || [])],
-    painters: [...(project.painters || [])],
-    files: [...(project.files || [])],
-    logs: [...(project.logs || [])],
-  };
-  const next = {
-    ...project,
-    name,
-    customer,
-    owner,
-    owners,
-    startAt,
-    endAt,
-    type: activeType,
-    status: activeStatus,
-    stage: activeStatus,
-    designers: projectDetailSelectedMembers("designers"),
-    painters: projectDetailSelectedMembers("painters"),
-  };
-  next.members = [...new Set([...next.designers, ...next.painters, ...owners])].join("、");
-  const entries = projectChangeLogEntries(previous, next, formatDateTime());
-  if (!entries.length) {
-    showToast("当前没有需要保存的修改。", "warning");
-    return;
-  }
-  Object.assign(project, next, { changeLogs: [...entries, ...(project.changeLogs || [])] });
-  setProjectStage(project, activeStatus);
-  projectDrafts = projectDrafts.filter((draft) => draft.id !== `PD-EDIT-${projectId}`);
-  saveProjectDrafts();
-  syncProjectLibrary();
-  saveStudioState();
-  renderCustomProjects();
-  refreshProjectDetail(project);
-  showToast("项目修改已确认并写入日志。", "success");
-}
 
-function projectLog(project, action, detail) {
-  project.changeLogs = [{
-    time: formatDateTime(),
-    user: currentAccount.name || currentAccount.role,
-    action,
-    detail,
-  }, ...(project.changeLogs || [])];
-}
 
-function persistProjectLifecycle(project, message, type = "success") {
-  normalizeProjectLifecycleProject(project);
-  syncProjectLibrary();
-  saveStudioState();
-  renderCustomProjects();
-  renderProjectArchiveCount();
-  if (projectDetailModal?.classList.contains("active") && activeProjectId === project.id && !project.archived) {
-    refreshProjectDetail(project);
-    projectDetailDirty = false;
-  }
-  renderDashboardOverview(currentAccount.role);
-  if (message) showToast(message, type);
-}
 
-function changeProjectStage(project, nextStage, actionLabel) {
-  const previous = projectStage(project);
-  if (previous === nextStage) return;
-  setProjectStage(project, nextStage);
-  projectLog(project, actionLabel || "调整阶段", `${previous} → ${nextStage}`);
-  persistProjectLifecycle(project, `项目已进入「${nextStage}」。`);
-}
 
-function archiveProject(project, result, reason, extra = {}) {
-  const now = formatDateTime();
-  const fromStage = projectStage(project);
-  project.projectResult = result;
-  project.archived = true;
-  project.archivedAt = now;
-  project.archivedFromStage = fromStage;
-  project.archiveReason = reason;
-  Object.assign(project, extra);
-  project.archiveHistory = [{
-    result,
-    archivedAt: now,
-    archivedBy: currentAccount.name || currentAccount.role,
-    fromStage,
-    reason,
-  }, ...(project.archiveHistory || [])];
-  projectLog(project, "归档项目", `${projectResultLabels[result]}：${reason}`);
-  persistProjectLifecycle(project, `${project.name} 已归档为“${projectResultLabels[result]}”。`);
-  closeProjectDetailModal();
-}
 
-function renderProjectArchiveCount() {
-  if (!projectArchiveCount) return;
-  if (projectArchiveCount) projectArchiveCount.textContent = String(customProjects.filter((project) => project.archived || project.projectResult).length);
-}
 
 function archiveTimeMatches(project, days) {
   if (days === "all") return true;
@@ -7550,414 +6431,33 @@ function archiveTimeMatches(project, days) {
   return Date.now() - archivedAt.getTime() <= Number(days) * 86400000;
 }
 
-function renderProjectArchiveList() {
-  if (!projectArchiveList) return;
-  const result = projectArchiveResultFilter?.value || "all";
-  const type = projectArchiveTypeFilter?.value || "all";
-  const customer = projectArchiveCustomerFilter?.value.trim().toLowerCase() || "";
-  const owner = projectArchiveOwnerFilter?.value.trim().toLowerCase() || "";
-  const deadline = projectArchiveDeadlineFilter?.value || "";
-  const time = projectArchiveTimeFilter?.value || "all";
-  const projects = customProjects
-    .filter((project) => project.archived || project.projectResult)
-    .filter((project) => result === "all" || project.projectResult === result)
-    .filter((project) => type === "all" || projectTypeValue(project) === type)
-    .filter((project) => !customer || String(project.customer || "").toLowerCase().includes(customer))
-    .filter((project) => !owner || String(project.owner || "").toLowerCase().includes(owner))
-    .filter((project) => !deadline || project.endAt === deadline)
-    .filter((project) => archiveTimeMatches(project, time))
-    .sort((a, b) => String(b.archivedAt || "").localeCompare(String(a.archivedAt || "")));
-  projectArchiveList.innerHTML = projects.length ? projects.map((project) => {
-    const resultLabel = projectResultLabels[project.projectResult] || "已归档";
-    const actualDate = project.completedAt || project.cancelledAt || project.terminatedAt || project.archivedAt || "-";
-    const reopen = canManageProjectLifecycle(project)
-      ? `<button class="primary-button compact" type="button" data-project-archive-reopen="${escapeHtml(project.id)}">重新打开项目</button>`
-      : "";
-    return `<article class="project-archive-row">
-      <div class="project-archive-main">
-        <span class="project-archive-result result-${escapeHtml(project.projectResult || "")}">${escapeHtml(resultLabel)}</span>
-        <strong>${escapeHtml(project.name || project.id)}</strong>
-        <small>${escapeHtml(projectTypeValue(project))} · 客户：${escapeHtml(project.customer || "非客户项目")}</small>
-      </div>
-      <dl>
-        <div><dt>负责人</dt><dd>${escapeHtml(project.owner || "未指定")}</dd></div>
-        <div><dt>原截止日期</dt><dd>${escapeHtml(project.endAt || "-")}</dd></div>
-        <div><dt>实际结束</dt><dd>${escapeHtml(actualDate)}</dd></div>
-        <div><dt>归档原因</dt><dd>${escapeHtml(project.archiveReason || "-")}</dd></div>
-      </dl>
-      ${reopen}
-    </article>`;
-  }).join("") : `<p class="empty-state">没有符合条件的归档项目。</p>`;
-}
 
-function openProjectArchiveModal() {
-  renderProjectArchiveList();
-  projectArchiveModal?.classList.add("active");
-  projectArchiveModal?.setAttribute("aria-hidden", "false");
-  lockBodyScroll(true);
-}
 
-function closeProjectArchiveModal() {
-  projectArchiveModal?.classList.remove("active");
-  projectArchiveModal?.setAttribute("aria-hidden", "true");
-  lockBodyScroll(false);
-}
 
 function lifecycleFieldValue(name) {
   return projectLifecycleBody?.querySelector(`[name="${name}"]`)?.value.trim() || "";
 }
 
-function closeProjectLifecycleModal() {
-  projectLifecycleModal?.classList.remove("active");
-  projectLifecycleModal?.setAttribute("aria-hidden", "true");
-  pendingProjectLifecycleAction = null;
-  lockBodyScroll(Boolean(projectDetailModal?.classList.contains("active") || projectArchiveModal?.classList.contains("active")));
-}
 
-function projectLifecycleFormHtml(project, action) {
-  if (action === "pause") return `
-    <label><span>暂停原因</span><textarea name="reason" rows="3" placeholder="请说明暂停原因"></textarea></label>
-    <label><span>预计恢复时间</span><input name="expectedResumeAt" type="date" /></label>`;
-  if (action === "deadline") return `<label><span>新的截止日期</span><input name="deadline" type="date" value="${escapeHtml(project.endAt || "")}" /></label>`;
-  if (action === "cancel") return `<label><span>取消原因</span><textarea name="reason" rows="4" placeholder="请填写取消原因"></textarea></label>`;
-  if (action === "terminate") return `
-    <label><span>终止原因</span><textarea name="reason" rows="3" placeholder="请填写终止原因"></textarea></label>
-    <label><span>当前完成情况</span><textarea name="completion" rows="3" placeholder="说明目前已经完成的内容"></textarea></label>
-    <label><span>补充说明</span><textarea name="note" rows="3" placeholder="可选"></textarea></label>`;
-  if (action === "reopen") return `<label><span>重新打开原因</span><textarea name="reason" rows="4" placeholder="请说明重新打开项目的原因"></textarea></label>`;
-  return "";
-}
 
-function openProjectLifecycleModal(project, action) {
-  pendingProjectLifecycleAction = { projectId: project.id, action };
-  const titleMap = {
-    pause: "暂停项目",
-    deadline: "修改截止日期",
-    cancel: "取消项目",
-    terminate: "终止项目",
-    reopen: "重新打开项目",
-  };
-  projectLifecycleTitle.textContent = titleMap[action] || "项目操作";
-  projectLifecycleBody.innerHTML = projectLifecycleFormHtml(project, action);
-  projectLifecycleConfirm.textContent = "确认";
-  projectLifecycleConfirm.classList.toggle("danger-button", ["cancel", "terminate"].includes(action));
-  projectLifecycleConfirm.classList.toggle("primary-button", !["cancel", "terminate"].includes(action));
-  projectLifecycleConfirm.disabled = false;
-  projectLifecycleModal.classList.add("active");
-  projectLifecycleModal.setAttribute("aria-hidden", "false");
-  lockBodyScroll(true);
-}
 
-function handleProjectLifecycleAction(project, action) {
-  if (!project || !canManageProjectLifecycle(project)) return;
-  const stage = projectStage(project);
-  if (["pause", "deadline", "cancel", "terminate"].includes(action)) {
-    if (action === "cancel" && !["需求确认", "概念方案"].includes(stage)) {
-      showToast("只有需求确认或概念方案阶段可以取消项目。", "warning");
-      return;
-    }
-    openProjectLifecycleModal(project, action);
-    return;
-  }
-  if (action === "resume") {
-    project.projectStatus = "normal";
-    project.resumedAt = formatDateTime();
-    projectLog(project, "恢复项目", `继续原阶段：${stage}`);
-    persistProjectLifecycle(project, `${project.name} 已恢复。`);
-    return;
-  }
-  if (action === "back-revision") {
-    changeProjectStage(project, "修改完善", "退回修改");
-    return;
-  }
-  if (action === "complete") {
-    if (stage !== "内部定稿") {
-      showToast("项目进入内部定稿后才能确认完成。", "warning");
-      return;
-    }
-    openExitConfirmation({
-      title: "完成并归档项目？",
-      message: "确认后项目会从当前看板移除，并进入已归档项目。",
-      submitText: "完成项目",
-      onConfirm: () => {
-        const now = formatDateTime();
-        project.completedAt = now;
-        project.completedBy = currentAccount.name || currentAccount.role;
-        archiveProject(project, "completed", "项目已完成");
-      },
-    });
-  }
-}
 
-async function submitProjectLifecycleAction() {
-  const pending = pendingProjectLifecycleAction;
-  if (!pending) return;
-  const project = customProjects.find((item) => item.id === pending.projectId);
-  if (!project) return closeProjectLifecycleModal();
-  const now = formatDateTime();
-  if (pending.action === "pause") {
-    const reason = lifecycleFieldValue("reason");
-    if (!reason) return showToast("请填写暂停原因。", "warning");
-    project.projectStatus = "paused";
-    project.pauseReason = reason;
-    project.pausedAt = now;
-    project.expectedResumeAt = lifecycleFieldValue("expectedResumeAt");
-    projectLog(project, "暂停项目", reason);
-    closeProjectLifecycleModal();
-    return persistProjectLifecycle(project, `${project.name} 已暂停。`, "warning");
-  }
-  if (pending.action === "deadline") {
-    const deadline = lifecycleFieldValue("deadline");
-    if (!validProjectDate(deadline)) return showToast("截止日期有缺失或有误。", "warning");
-    const previous = project.endAt || "未设置";
-    project.endAt = deadline;
-    projectLog(project, "修改截止日期", `${previous} → ${deadline}`);
-    closeProjectLifecycleModal();
-    return persistProjectLifecycle(project, "截止日期已更新。");
-  }
-  if (pending.action === "cancel") {
-    const reason = lifecycleFieldValue("reason");
-    if (!reason) return showToast("请填写取消原因。", "warning");
-    project.cancelledAt = now;
-    project.cancelledBy = currentAccount.name || currentAccount.role;
-    closeProjectLifecycleModal();
-    return archiveProject(project, "cancelled", reason, { cancellationReason: reason });
-  }
-  if (pending.action === "terminate") {
-    const reason = lifecycleFieldValue("reason");
-    const completion = lifecycleFieldValue("completion");
-    if (!reason || !completion) return showToast("请填写终止原因和当前完成情况。", "warning");
-    const note = lifecycleFieldValue("note");
-    project.terminatedAt = now;
-    project.terminatedBy = currentAccount.name || currentAccount.role;
-    closeProjectLifecycleModal();
-    return archiveProject(project, "terminated", reason, {
-      terminationReason: reason,
-      terminationCompletion: completion,
-      terminationNote: note,
-    });
-  }
-  if (pending.action === "reopen") {
-    const reason = lifecycleFieldValue("reason");
-    if (!reason) return showToast("请填写重新打开原因。", "warning");
-    const previousResult = project.projectResult;
-    const nextStage = previousResult === "completed" ? "内部定稿" : previousResult === "cancelled" ? "需求确认" : normalizeProjectBoardStatus(project.archivedFromStage || "需求确认");
-    project.archiveHistory = [{
-      reopenedAt: now,
-      reopenedBy: currentAccount.name || currentAccount.role,
-      reopenReason: reason,
-      previousResult,
-    }, ...(project.archiveHistory || [])];
-    project.reopenedAt = now;
-    project.reopenedBy = currentAccount.name || currentAccount.role;
-    project.reopenReason = reason;
-    project.projectResult = null;
-    project.archived = false;
-    project.archivedAt = "";
-    project.projectStatus = "normal";
-    setProjectStage(project, nextStage);
-    projectLog(project, "重新打开项目", `${projectResultLabels[previousResult] || "归档"} → ${nextStage}；${reason}`);
-    closeProjectLifecycleModal();
-    closeProjectArchiveModal();
-    return persistProjectLifecycle(project, `${project.name} 已重新打开。`);
-  }
-}
 
-function projectImageEntries(project = activeProject()) {
-  return projectFileEntries(project).filter((file) => String(file.type || "").startsWith("image/") || /\.(jpe?g|png)$/i.test(file.name || ""));
-}
 
-function isProjectPdfFile(file) {
-  return String(file?.type || "").includes("pdf") || /\.pdf$/i.test(file?.name || "");
-}
 
-async function projectFileSource(file) {
-  if (file?.dataUrl && !String(file.dataUrl).startsWith("blob:")) return file.dataUrl;
-  if (file?.key) return resolveImageSource(file.key);
-  return "";
-}
 
-async function downloadProjectFile(file) {
-  const source = await projectFileSource(file);
-  if (!source) {
-    showToast("这个历史文件没有保存实体内容，请重新上传后下载。", "warning");
-    return;
-  }
-  const link = document.createElement("a");
-  link.href = source;
-  link.download = file.name || "项目文件";
-  link.click();
-  showToast(`${file.name || "项目文件"} 下载已开始。`, "success");
-}
 
-function applyProjectFileTransform() {
-  if (!projectFileViewerImage) return;
-  projectFileViewerImage.style.transform = `translate(${projectFileOffsetX}px, ${projectFileOffsetY}px) scale(${projectFileZoom})`;
-}
 
-function resetProjectFileTransform() {
-  projectFileZoom = 1;
-  projectFileOffsetX = 0;
-  projectFileOffsetY = 0;
-  applyProjectFileTransform();
-}
 
-function changeProjectFileZoom(delta) {
-  projectFileZoom = Math.min(5, Math.max(0.5, projectFileZoom + delta));
-  applyProjectFileTransform();
-}
 
-function renderProjectFilePalette(project, files) {
-  if (!projectFileViewerPalette) return;
-  projectFileViewerPalette.innerHTML = files
-    .map((file, index) => {
-      const active = index === activeProjectFileIndex ? "active" : "";
-      return `<button class="${active}" type="button" data-project-viewer-palette="${index}">
-        <span style="background-image:url('${file.dataUrl}')"></span>
-        <small>${index === 0 ? "主图" : `配色 ${index + 1}`}</small>
-      </button>`;
-    })
-    .join("");
-  if (projectFileViewerPaletteText) projectFileViewerPaletteText.textContent = files.length > 1 ? `共 ${files.length} 色 / 当前 ${activeProjectFileIndex + 1}` : "主图 / 1 色";
-  if (projectFileViewerNote) projectFileViewerNote.textContent = project?.note || "暂无设计备注";
-}
 
-async function renderProjectFileViewer() {
-  const project = activeProject();
-  const files = projectFileEntries(project);
-  const file = files[activeProjectFileIndex];
-  if (!project || !file) return;
-  const isImage = String(file.type || "").startsWith("image/") || /\.(jpe?g|png)$/i.test(file.name || "");
-  const isPdf = isProjectPdfFile(file);
-  const source = await projectFileSource(file);
-  const showImage = isImage && Boolean(source);
-  const showPdf = isPdf && Boolean(source);
-  projectFileViewerImage.classList.toggle("hidden", !showImage);
-  projectFileViewerFrame.classList.toggle("hidden", !showPdf);
-  projectFileGenericPreview.classList.toggle("hidden", showImage || showPdf);
-  projectFileViewerImage.src = showImage ? source : "";
-  projectFileViewerFrame.src = showPdf ? source : "about:blank";
-  projectFileGenericPreview.innerHTML = !showImage && !showPdf
-    ? `<strong>${escapeHtml(fileExtension(file.name))}</strong><p>${source ? "文件已保存，可下载后在对应软件中查看。" : "历史文件未保存实体内容，请重新上传。"}</p>`
-    : "";
-  projectFileViewerName.textContent = file.name || "项目文件";
-  projectFileViewerPalette.innerHTML = "";
-  projectFileViewerPalette.classList.add("hidden");
-  projectFileViewerPaletteText.textContent = `${escapeHtml(fileExtension(file.name))} · ${file.size ? `${Math.max(0.01, file.size / 1024 / 1024).toFixed(2)} MB` : "文件预览"}`;
-  projectFileViewerNote.textContent = project?.note || "暂无设计备注";
-  projectFileViewerDownload.disabled = !source;
-  resetProjectFileTransform();
-}
 
-function openProjectFileViewer(file, index = 0) {
-  const project = activeProject();
-  const files = projectFileEntries(project);
-  if (!files.length) {
-    showToast("该项目暂无文件。", "warning");
-    return;
-  }
-  const matchedIndex = files.findIndex((item) => item.entryId === file?.entryId);
-  activeProjectFileIndex = matchedIndex >= 0 ? matchedIndex : 0;
-  renderProjectFileViewer();
-  projectFileViewer.classList.add("active");
-  projectFileViewer.setAttribute("aria-hidden", "false");
-  lockBodyScroll(true);
-}
 
-function closeProjectFileViewer() {
-  projectFileViewer.classList.remove("active");
-  projectFileViewer.setAttribute("aria-hidden", "true");
-  projectFileViewerImage.src = "";
-  projectFileViewerFrame.src = "about:blank";
-  projectFileGenericPreview.innerHTML = "";
-  projectFileViewerImage.style.transform = "";
-  activeProjectFileIndex = 0;
-  lockBodyScroll(false);
-}
 
-function renderProjectFileManager() {
-  const project = activeProject();
-  if (!projectFileManagerGrid || !project) return;
-  const files = projectFileEntries(project);
-  if (projectFileManagerGrid) projectFileManagerGrid.innerHTML = files.length
-    ? files.map((file, index) => projectFileTileHtml(file, index, "manager")).join("")
-    : `<p class="project-empty-file">无文件</p>`;
-}
 
-function openProjectFileManager() {
-  const project = activeProject();
-  if (!project) return;
-  renderProjectFileManager();
-  projectFileManager?.classList.add("active");
-  projectFileManager?.setAttribute("aria-hidden", "false");
-  lockBodyScroll(true);
-}
 
-function closeProjectFileManager() {
-  projectFileManager?.classList.remove("active");
-  projectFileManager?.setAttribute("aria-hidden", "true");
-  projectManagerDragEntryId = "";
-  lockBodyScroll(false);
-}
 
-function removeProjectFileByEntryId(entryId) {
-  const project = activeProject();
-  if (!project || !entryId) return;
-  const files = projectFileEntries(project);
-  const target = files.find((file) => file.entryId === entryId);
-  if (!target) return;
-  if (target.sourceType === "initial") {
-    project.files = (project.files || []).filter((_, index) => index !== target.sourceIndex);
-  } else {
-    project.uploads = (project.uploads || []).filter((_, index) => index !== target.sourceIndex);
-  }
-  project.changeLogs = [
-    {
-      time: formatDateTime(),
-      user: currentAccount.name,
-      action: "删除项目文件",
-      detail: target.name,
-    },
-    ...(project.changeLogs || []),
-  ];
-  saveStudioState();
-  refreshProjectDetail(project);
-  renderProjectFileManager();
-  showToast(`已删除 ${target.name}。`, "warning");
-}
 
-async function attachProjectDetailFiles(fileList) {
-  const project = activeProject();
-  const existingCount = (project?.files || []).length + (project?.uploads || []).length;
-  const availableSlots = Math.max(0, MAX_UPLOAD_FILES - existingCount);
-  const incomingFiles = acceptedUploadFiles(fileList, {
-    label: "项目文件",
-    maxBytes: MAX_RESOURCE_FILE_BYTES,
-  });
-  const files = incomingFiles.slice(0, availableSlots);
-  if (incomingFiles.length > files.length) showToast("超过最大上传数量", "warning");
-  if (!project || !files.length || !projectParticipantCanUpload(project)) return;
-  const uploadedAt = formatDateTime();
-  const uploads = [];
-  for (const file of files) {
-    const key = `project_upload_${project.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    await saveImageToDB(key, file);
-    uploads.push({
-      name: file.name,
-      type: file.type || "",
-      size: file.size || 0,
-      uploader: currentAccount.name,
-      time: uploadedAt,
-      key,
-      dataUrl: "",
-    });
-  }
-  project.uploads = [...uploads, ...(project.uploads || [])];
-  saveStudioState();
-  renderCustomProjects();
-  refreshProjectDetail(project);
-  showToast(`已上传 ${uploads.length} 个项目文件。`, "success");
-}
 
 function releaseFileURLs() {
   fileObjectURLs.forEach((url) => URL.revokeObjectURL(url));
@@ -8067,35 +6567,6 @@ function renderPaletteUploadFiles() {
   choosePaletteFiles.classList.toggle("hidden", selectedPaletteFiles.length >= MAX_UPLOAD_FILES);
 }
 
-function renderProjectResults(keyword) {
-  const query = keyword.trim().toLowerCase();
-  syncProjectLibrary();
-  const results = projectLibrary.filter((item) => {
-    const indexText = `${item.name} ${item.status} ${item.members}`.toLowerCase();
-    return !query || indexText.includes(query);
-  });
-  const exactMatch = projectLibrary.some((item) => item.name.trim().toLowerCase() === query);
-  const resultMarkup = results.length
-    ? results
-    .map((item) => {
-      const active = selectedProjects.some((project) => project.name === item.name) ? "active" : "";
-      return `<button class="project-option ${active}" type="button" data-project="${item.name}">
-        <div>
-          <strong>${item.name}</strong>
-          <span>${item.status} / ${item.members}</span>
-        </div>
-        <i>${active ? "✓" : "+"}</i>
-      </button>`;
-    })
-    .join("")
-    : `<p class="empty-state">没有匹配的项目。</p>`;
-  const createMarkup = exactMatch
-    ? ""
-    : `<button class="project-create-option" type="button" data-create-linked-project="${escapeHtml(keyword.trim())}">
-        <span>＋</span><strong>${keyword.trim() ? `新建项目“${escapeHtml(keyword.trim())}”` : "新建项目"}</strong>
-      </button>`;
-  projectResults.innerHTML = resultMarkup + createMarkup;
-}
 
 function updatePainterPickerCount() {
   painterSelectedCount.textContent = `已选 ${draftPainterSelection.length} 幅`;
@@ -8153,14 +6624,14 @@ function openPainterPickerModal() {
   painterPickerSearch.value = "";
   painterFilter.value = "all";
   renderPainterPicker();
-  painterPickerModal.classList.add("active");
-  painterPickerModal.setAttribute("aria-hidden", "false");
+  painterPickerModal?.classList.add("active");
+  painterPickerModal?.setAttribute("aria-hidden", "false");
   lockBodyScroll(true);
 }
 
 function closePainterPickerModal() {
-  painterPickerModal.classList.remove("active");
-  painterPickerModal.setAttribute("aria-hidden", "true");
+  painterPickerModal?.classList.remove("active");
+  painterPickerModal?.setAttribute("aria-hidden", "true");
   lockBodyScroll(false);
 }
 
@@ -8179,14 +6650,6 @@ function updateLinkedPainterSummary() {
   hydrateLazyKeyImages(linkedPainterList);
 }
 
-function renderLinkedProjects() {
-  linkedProjectSummary.textContent = selectedProjects.length ? `已关联 ${selectedProjects.length} 个` : "未选择";
-  clearLinkedProjects.classList.toggle("hidden", !selectedProjects.length);
-  linkedProjectList.innerHTML = selectedProjects.map((item, index) => `<article class="linked-selection-item project-selection-item">
-    <div><strong>${escapeHtml(item.name)}</strong><button class="project-role-tag ${index === 0 ? "primary" : ""}" type="button" data-make-primary="${escapeHtml(item.name)}">${index === 0 ? "主项目" : "设为主项目"}</button></div>
-    <button type="button" data-remove-project="${escapeHtml(item.name)}" aria-label="移除 ${escapeHtml(item.name)}">×</button>
-  </article>`).join("");
-}
 
 function mergeUniqueFiles(existing, incoming) {
   const keys = new Set(existing.map(fileIdentity));
@@ -9479,9 +7942,9 @@ projectNameInput?.addEventListener("input", () => {
   clearProjectValidation();
 });
 projectCustomerInput?.addEventListener("input", () => {
-  const exactMatch = [...projectCustomerSelect.options].find((option) => option.textContent === projectCustomerInput.value.trim());
-  if (exactMatch) projectCustomerSelect.value = exactMatch.value;
-  renderProjectCustomerOptions(projectCustomerInput.value);
+  const exactMatch = [...projectCustomerSelect.options].find((option) => option.textContent === projectCustomerInput?.value.trim());
+  if (exactMatch) projectCustomerSelect && (projectCustomerSelect.value = exactMatch.value)
+  renderProjectCustomerOptions(projectCustomerInput?.value);
 });
 projectCustomerOptions?.addEventListener("click", (event) => {
   const createButton = event.target.closest("[data-project-customer-create]");
@@ -9496,7 +7959,7 @@ projectCustomerOptions?.addEventListener("click", (event) => {
   chooseProjectCustomer(option.dataset.projectCustomer);
 });
 projectCustomerCreateInline?.addEventListener("click", () => {
-  createDefaultProjectCustomer(projectCustomerCreateInline.dataset.customerName || projectCustomerInput.value);
+  createDefaultProjectCustomer(projectCustomerCreateInline.dataset.customerName || projectCustomerInput?.value);
 });
 document.addEventListener("click", (event) => {
   if (!event.target.closest("#projectCustomerCombobox")) setProjectCustomerOpen(false);
@@ -9890,7 +8353,7 @@ projectDetailBody?.addEventListener("click", (event) => {
   const uploadButton = event.target.closest("[data-project-upload]");
   if (uploadButton) {
     activeProjectId = uploadButton.dataset.projectUpload;
-    projectDetailFileInput.value = "";
+    if (projectDetailFileInput) projectDetailFileInput.value = "";
     projectDetailFileInput.click();
     return;
   }
@@ -9920,12 +8383,12 @@ projectDetailBody?.addEventListener("dblclick", (event) => {
 });
 projectDetailFileInput?.addEventListener("change", async () => {
   try {
-    await attachProjectDetailFiles(projectDetailFileInput.files);
+    await attachProjectDetailFiles(projectDetailFileInput?.files);
   } catch (error) {
     console.error(error);
     showToast("项目文件上传失败，请重新选择。", "error");
   } finally {
-    projectDetailFileInput.value = "";
+    if (projectDetailFileInput) projectDetailFileInput.value = "";
   }
 });
 projectFileViewerClose?.addEventListener("click", closeProjectFileViewer);
@@ -10507,7 +8970,7 @@ painterPickerConfirm.addEventListener("click", () => {
   updateLinkedPainterSummary();
   closePainterPickerModal();
 });
-painterPickerModal.addEventListener("click", (event) => {
+painterPickerModal?.addEventListener("click", (event) => {
   if (event.target === painterPickerModal) {
     closePainterPickerModal();
   }
@@ -10544,19 +9007,19 @@ painterPickerGrid.addEventListener("click", (event) => {
     : [...draftPainterSelection, item];
   renderPainterPicker();
 });
-projectSearch.addEventListener("focus", () => renderProjectResults(projectSearch.value));
-projectSearch.addEventListener("click", () => renderProjectResults(projectSearch.value));
-projectSearch.addEventListener("input", () => {
+projectSearch?.addEventListener("focus", () => renderProjectResults(projectSearch?.value));
+projectSearch?.addEventListener("click", () => renderProjectResults(projectSearch?.value));
+projectSearch?.addEventListener("input", () => {
   clearTimeout(projectSearchTimer);
-  projectSearchTimer = setTimeout(() => renderProjectResults(projectSearch.value), 200);
+  projectSearchTimer = setTimeout(() => renderProjectResults(projectSearch?.value), 200);
 });
-projectResults.addEventListener("click", (event) => {
+projectResults?.addEventListener("click", (event) => {
   const createButton = event.target.closest("[data-create-linked-project]");
   if (createButton) {
     const name = createButton.dataset.createLinkedProject.trim();
     if (!name) {
       projectSearch.placeholder = "先输入新项目名称";
-      projectSearch.focus();
+      projectSearch?.focus();
       return;
     }
     const now = formatDateTime();
@@ -10589,7 +9052,7 @@ projectResults.addEventListener("click", (event) => {
     syncProjectLibrary();
     const created = projectLibrary.find((item) => item.name === name);
     if (created) selectedProjects.push(created);
-    projectSearch.value = "";
+    if (projectSearch) projectSearch.value = "";
     saveStudioState();
     renderLinkedProjects();
     renderProjectResults("");
@@ -10602,11 +9065,11 @@ projectResults.addEventListener("click", (event) => {
   if (!project) return;
   const exists = selectedProjects.some((item) => item.name === project.name);
   selectedProjects = exists ? selectedProjects.filter((item) => item.name !== project.name) : [...selectedProjects, project];
-  projectSearch.value = "";
+  if (projectSearch) projectSearch.value = "";
   renderLinkedProjects();
   renderProjectResults("");
 });
-linkedProjectList.addEventListener("click", (event) => {
+linkedProjectList?.addEventListener("click", (event) => {
   const removeButton = event.target.closest("[data-remove-project]");
   const primaryButton = event.target.closest("[data-make-primary]");
   if (removeButton) selectedProjects = selectedProjects.filter((item) => item.name !== removeButton.dataset.removeProject);
@@ -10616,20 +9079,20 @@ linkedProjectList.addEventListener("click", (event) => {
   }
   if (!removeButton && !primaryButton) return;
   renderLinkedProjects();
-  renderProjectResults(projectSearch.value);
+  renderProjectResults(projectSearch?.value);
 });
-clearLinkedProjects.addEventListener("click", () => {
+clearLinkedProjects?.addEventListener("click", () => {
   selectedProjects = [];
   renderLinkedProjects();
-  renderProjectResults(projectSearch.value);
+  renderProjectResults(projectSearch?.value);
 });
-clearProjectSearch.addEventListener("click", () => {
-  projectSearch.focus();
+clearProjectSearch?.addEventListener("click", () => {
+  projectSearch?.focus();
 });
-addLinkedProject.addEventListener("click", () => {
-  projectSearch.value = "";
+addLinkedProject?.addEventListener("click", () => {
+  if (projectSearch) projectSearch.value = "";
   renderProjectResults("");
-  projectSearch.focus();
+  projectSearch?.focus();
 });
 linkedPainterList.addEventListener("click", (event) => {
   const removeButton = event.target.closest("[data-remove-painter]");
@@ -11210,7 +9673,7 @@ document.addEventListener("keydown", (event) => {
       closeLightbox();
       return;
     }
-    if (painterPickerModal.classList.contains("active")) {
+    if (painterPickerModal?.classList.contains("active")) {
       closePainterPickerModal();
       return;
     }

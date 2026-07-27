@@ -293,38 +293,6 @@
             </div>
 
             <div class="admin-command-grid">
-              <section class="panel wide">
-                <div class="panel-head">
-                  <h3>项目面板</h3>
-                  <span>管理员实时视图</span>
-                </div>
-                <div class="project-list project-command-list">
-                  <article>
-                    <div>
-                      <strong>春夏清透花卉四件套系列</strong>
-                      <span>阶段：出稿评审 / 今日新增 9 张 / 主设计师：许然</span>
-                    </div>
-                    <progress value="68" max="100"></progress>
-                    <b>68%</b>
-                  </article>
-                  <article>
-                    <div>
-                      <strong>轻奢几何客户定制项目</strong>
-                      <span>阶段：修改复审 / 今日新增 6 张 / 协作成员 4 人</span>
-                    </div>
-                    <progress value="56" max="100"></progress>
-                    <b>56%</b>
-                  </article>
-                  <article>
-                    <div>
-                      <strong>秋冬暖调植物图库扩充</strong>
-                      <span>阶段：自主稿筛选 / 今日新增 14 张 / 待归类 7 张</span>
-                    </div>
-                    <progress value="41" max="100"></progress>
-                    <b>41%</b>
-                  </article>
-                </div>
-              </section>
 
               <section class="panel">
                 <div class="panel-head">
@@ -940,19 +908,6 @@
           <button class="ghost-button full-add-button standard-add-button" id="openPainterPicker" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg><span>增加</span></button>
         </section>
 
-        <section class="project-link-panel">
-          <div class="panel-head">
-            <h3>关联项目</h3>
-            <div class="project-summary-actions"><span id="linkedProjectSummary">未选择</span><button class="text-clear-button hidden" id="clearLinkedProjects" type="button">清空</button></div>
-          </div>
-          <div class="linked-selection-list" id="linkedProjectList"></div>
-          <div class="project-search-wrap">
-            <input id="projectSearch" placeholder="搜索或点击选择项目" />
-            <button id="clearProjectSearch" type="button" aria-label="搜索项目"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></button>
-          </div>
-          <div class="project-results" id="projectResults"></div>
-          <button class="ghost-button full-add-button standard-add-button" id="addLinkedProject" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg><span>增加</span></button>
-        </section>
 
         <section class="reference-panel">
           <div class="panel-head">
@@ -1071,130 +1026,6 @@
       </div>
     </div>
 
-    <div class="upload-modal" id="projectModal" aria-hidden="true">
-      <div class="upload-dialog project-dialog">
-        <header class="modal-head">
-          <div>
-            <p class="eyebrow">CREATE PROJECT</p>
-            <h2 id="projectModalTitle">新建项目</h2>
-          </div>
-          <button class="modal-close" id="projectClose" type="button" aria-label="关闭新建项目">×</button>
-        </header>
-
-        <div class="project-create-body">
-          <label class="project-field wide project-name-field">
-            <span>项目名称</span>
-            <div class="project-line-input"><input id="projectNameInput" aria-label="项目名称" /></div>
-          </label>
-
-          <label class="project-field wide customer-project-field">
-            <span>客户</span>
-            <select class="visually-hidden" id="projectCustomerSelect" aria-hidden="true" tabindex="-1">
-              <option>非客户项目</option>
-              <option>客户 A / 春夏加购</option>
-              <option>南通家纺客户 / 四件套</option>
-              <option>杭州渠道客户 / 秋冬系列</option>
-            </select>
-            <div class="project-customer-combobox" id="projectCustomerCombobox">
-              <div class="project-customer-control">
-                <input id="projectCustomerInput" placeholder="输入名称搜索客户" autocomplete="off" aria-label="客户" aria-expanded="false" aria-controls="projectCustomerOptions" />
-                <button class="project-customer-create-inline hidden" id="projectCustomerCreateInline" type="button"><span aria-hidden="true">＋</span>新增客户</button>
-              </div>
-              <div class="project-customer-options" id="projectCustomerOptions"></div>
-            </div>
-          </label>
-
-          <section class="project-field wide project-type-field">
-            <span>项目类别</span>
-            <div class="project-type-options" id="projectTypeOptions" role="group" aria-label="选择项目类别">
-              <button type="button" data-project-type="选稿">选稿</button>
-              <button class="active" type="button" data-project-type="定制">定制</button>
-              <button type="button" data-project-type="内部">内部项目</button>
-            </div>
-          </section>
-
-          <section class="project-field wide project-status-field">
-            <span>初始状态</span>
-            <div class="project-status-options" id="projectStatusOptions">
-              <button class="active" type="button" data-project-status="需求确认">需求确认</button>
-              <button type="button" data-project-status="概念方案">概念方案</button>
-              <button type="button" data-project-status="设计制作">设计制作</button>
-              <button type="button" data-project-status="稿件评审">稿件评审</button>
-              <button type="button" data-project-status="修改完善">修改完善</button>
-              <button type="button" data-project-status="内部定稿">内部定稿</button>
-            </div>
-          </section>
-
-          <section class="project-file-drop">
-            <strong>项目资料</strong>
-            <p>支持 PSD、AI、JPEG、JPG、PNG、PDF、Word、PPT。</p>
-            <button class="standard-add-button" id="chooseProjectFiles" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg><span>增加</span></button>
-            <input class="visually-hidden" id="projectFilesInput" type="file" accept=".psd,.ai,.jpg,.jpeg,.png,.pdf,.doc,.docx,.ppt,.pptx,application/postscript,image/jpeg,image/png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple />
-            <div class="project-file-readout" id="projectFileReadout"></div>
-          </section>
-
-          <section class="project-field">
-            <span>参与设计师</span>
-            <div class="project-member-combobox" data-project-member-box="designer">
-              <div class="project-member-selected" id="projectDesignerSummary"></div>
-              <div class="member-search-line"><input id="projectDesignerSearch" data-member-search="designer" placeholder="输入姓名搜索设计师" aria-label="搜索设计师" autocomplete="off" /><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></div>
-              <div class="member-checkbox-grid project-member-results" id="projectDesignerOptions">
-                <label><input type="checkbox" value="许然" /><span>许然</span></label>
-                <label><input type="checkbox" value="林若" /><span>林若</span></label>
-                <label><input type="checkbox" value="孟夏" /><span>孟夏</span></label>
-                <label><input type="checkbox" value="陈一" /><span>陈一</span></label>
-              </div>
-            </div>
-          </section>
-
-          <section class="project-field">
-            <span>参与手绘师</span>
-            <div class="project-member-combobox" data-project-member-box="painter">
-              <div class="project-member-selected" id="projectPainterSummary"></div>
-              <div class="member-search-line"><input id="projectPainterSearch" data-member-search="painter" placeholder="输入姓名搜索手绘师" aria-label="搜索手绘师" autocomplete="off" /><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></div>
-              <div class="member-checkbox-grid project-member-results" id="projectPainterOptions">
-                <label><input type="checkbox" value="阿沁" /><span>阿沁</span></label>
-                <label><input type="checkbox" value="周禾" /><span>周禾</span></label>
-                <label><input type="checkbox" value="洛川" /><span>洛川</span></label>
-                <label><input type="checkbox" value="苏叶" /><span>苏叶</span></label>
-              </div>
-            </div>
-          </section>
-
-          <section class="project-field">
-            <span>负责人</span>
-            <div class="project-member-combobox owner-dropdown" id="projectOwnerDropdown" data-project-member-box="owner">
-              <div class="project-member-selected" id="projectOwnerSummary"><em>选择负责人</em></div>
-              <div class="member-search-line"><input id="projectOwnerSearch" data-member-search="owner" placeholder="输入姓名搜索负责人" aria-label="搜索负责人" autocomplete="off" /><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></div>
-              <div class="owner-option-list project-member-results" id="projectOwnerOptions">
-                <label><input type="checkbox" value="管理员 / 总控" /><span>管理员 / 总控</span></label>
-                <label><input type="checkbox" value="许然" /><span>许然</span></label>
-                <label><input type="checkbox" value="林若" /><span>林若</span></label>
-                <label><input type="checkbox" value="阿沁" /><span>阿沁</span></label>
-                <label><input type="checkbox" value="周禾" /><span>周禾</span></label>
-                <label><input type="checkbox" value="陈一" /><span>陈一</span></label>
-              </div>
-            </div>
-          </section>
-
-          <section class="project-field wide project-time-field">
-            <span>项目时间</span>
-            <div class="project-time-grid">
-              <label class="project-date-field project-start-field"><span>开始</span><input id="projectStartDate" type="date" min="1000-01-01" max="9999-12-31" /></label>
-              <label class="project-date-field project-end-field"><span>结束</span><input id="projectEndDate" type="date" min="1000-01-01" max="9999-12-31" /></label>
-            </div>
-          </section>
-          <textarea id="projectNoteInput" class="visually-hidden" aria-hidden="true" tabindex="-1"></textarea>
-        </div>
-
-        <footer class="modal-actions">
-          <div class="project-validation-summary hidden" id="projectValidationSummary"></div>
-          <button class="ghost-button" id="projectCancel" type="button">取消</button>
-          <button class="project-save-draft" id="projectSaveDraft" type="button">存入草稿箱</button>
-          <button class="primary-button" id="projectConfirm" type="button">确认</button>
-        </footer>
-      </div>
-    </div>
 
     <div class="upload-modal" id="customerModal" aria-hidden="true">
       <div class="upload-dialog customer-dialog">
@@ -1250,42 +1081,7 @@
       </div>
     </div>
 
-    <div class="upload-modal" id="projectDetailModal" aria-hidden="true">
-      <div class="upload-dialog project-detail-dialog">
-        <header class="modal-head project-detail-head">
-          <div>
-            <p class="eyebrow">PROJECT DETAIL</p>
-            <div class="project-detail-title-row">
-              <input id="projectDetailTitle" aria-label="项目名称" value="项目详情" />
-            </div>
-          </div>
-          <div class="project-detail-top-status" id="projectDetailTopStatus"></div>
-          <button class="modal-close" id="projectDetailClose" type="button" aria-label="关闭项目详情">×</button>
-        </header>
-        <div class="project-detail-body" id="projectDetailBody"></div>
-      </div>
-    </div>
 
-    <div class="upload-modal" id="projectFileViewer" aria-hidden="true">
-      <div class="project-file-viewer-dialog">
-        <button class="modal-close project-file-viewer-close" id="projectFileViewerClose" type="button" aria-label="关闭文件预览">×</button>
-        <div class="project-file-viewer-stage">
-          <img id="projectFileViewerImage" alt="项目文件预览" />
-          <iframe class="hidden" id="projectFileViewerFrame" title="项目文件预览"></iframe>
-          <div class="project-file-generic-preview hidden" id="projectFileGenericPreview"></div>
-        </div>
-        <aside class="project-file-viewer-info">
-          <p class="eyebrow">PROJECT FILE</p>
-          <h3 id="projectFileViewerName">项目文件</h3>
-          <dl>
-            <div><dt>一花多色</dt><dd id="projectFileViewerPaletteText">主图 / 1 色</dd></div>
-            <div><dt>设计备注</dt><dd id="projectFileViewerNote">暂无备注</dd></div>
-          </dl>
-          <div class="project-file-viewer-palette" id="projectFileViewerPalette"></div>
-          <button class="primary-button project-file-download-button" id="projectFileViewerDownload" type="button">下载文件</button>
-        </aside>
-      </div>
-    </div>
 
     <div class="upload-modal" id="riskModal" aria-hidden="true">
       <div class="risk-dialog">
@@ -1297,15 +1093,6 @@
       </div>
     </div>
 
-    <div class="upload-modal" id="teamProjectsModal" aria-hidden="true">
-      <div class="upload-dialog team-projects-dialog">
-        <header class="modal-head">
-          <div><p class="eyebrow">MEMBER PROJECTS</p><h2 id="teamProjectsTitle">负责项目</h2></div>
-          <button class="modal-close" id="teamProjectsClose" type="button" aria-label="关闭成员项目">×</button>
-        </header>
-        <div class="team-projects-body" id="teamProjectsBody"></div>
-      </div>
-    </div>
 
     <div class="member-picker-modal" id="memberPickerModal" aria-hidden="true">
       <button class="member-picker-backdrop" type="button" data-member-picker-close aria-label="关闭成员选择"></button>
@@ -1331,59 +1118,8 @@
       </aside>
     </div>
 
-    <div class="upload-modal" id="projectDraftModal" aria-hidden="true">
-      <div class="upload-dialog project-draft-dialog">
-        <header class="modal-head"><div><p class="eyebrow">PROJECT DRAFTS</p><h2>项目草稿箱</h2></div><button class="modal-close" id="projectDraftClose" type="button" aria-label="关闭草稿箱">×</button></header>
-        <div class="project-draft-list" id="projectDraftList"></div>
-      </div>
-    </div>
 
-    <div class="upload-modal" id="projectArchiveModal" aria-hidden="true">
-      <div class="upload-dialog project-archive-dialog">
-        <header class="modal-head">
-          <div><p class="eyebrow">ARCHIVED PROJECTS</p><h2>已归档项目</h2></div>
-          <button class="modal-close" id="projectArchiveClose" type="button" aria-label="关闭已归档项目">×</button>
-        </header>
-        <div class="project-archive-filters">
-          <select id="projectArchiveResultFilter" aria-label="项目结果">
-            <option value="all">全部结果</option>
-            <option value="completed">已完成</option>
-            <option value="cancelled">已取消</option>
-            <option value="terminated">已终止</option>
-          </select>
-          <select id="projectArchiveTypeFilter" aria-label="项目类型">
-            <option value="all">全部类型</option>
-            <option value="选稿">选稿</option>
-            <option value="定制">定制项目</option>
-            <option value="内部">内部项目</option>
-          </select>
-          <input id="projectArchiveCustomerFilter" type="search" placeholder="客户" aria-label="按客户筛选" />
-          <input id="projectArchiveOwnerFilter" type="search" placeholder="负责人" aria-label="按负责人筛选" />
-          <input id="projectArchiveDeadlineFilter" type="date" aria-label="按原截止日期筛选" title="原截止日期" />
-          <select id="projectArchiveTimeFilter" aria-label="归档时间">
-            <option value="all">全部归档时间</option>
-            <option value="7">最近 7 天</option>
-            <option value="30">最近 30 天</option>
-            <option value="365">最近一年</option>
-          </select>
-        </div>
-        <div class="project-archive-list" id="projectArchiveList"></div>
-      </div>
-    </div>
 
-    <div class="upload-modal" id="projectLifecycleModal" aria-hidden="true">
-      <div class="upload-dialog project-lifecycle-dialog">
-        <header class="modal-head">
-          <div><p class="eyebrow">PROJECT ACTION</p><h2 id="projectLifecycleTitle">项目操作</h2></div>
-          <button class="modal-close" id="projectLifecycleClose" type="button" aria-label="关闭项目操作">×</button>
-        </header>
-        <div class="project-lifecycle-body" id="projectLifecycleBody"></div>
-        <footer class="modal-actions">
-          <button class="ghost-button" id="projectLifecycleCancel" type="button">取消</button>
-          <button class="primary-button" id="projectLifecycleConfirm" type="button">确认</button>
-        </footer>
-      </div>
-    </div>
 
     <!-- 客户看稿入口页（全屏、外部展示） -->
     <div class="viewer-entry" id="viewerEntry" aria-hidden="true">
@@ -1469,7 +1205,6 @@
     <input type="file" id="addReferenceInput" accept="image/*" multiple style="display:none" />
     <input type="file" id="sourceFileInput" style="display:none" />
     <input type="file" id="paletteFileInput" accept=".jpeg,.jpg,.png,.psd,.tif,.tiff,image/jpeg,image/png,image/tiff,image/vnd.adobe.photoshop" multiple style="display:none" />
-    <input type="file" id="projectDetailFileInput" accept=".psd,.ai,.jpg,.jpeg,.png,.pdf,.doc,.docx,.ppt,.pptx,application/postscript,image/jpeg,image/png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple style="display:none" />
 
     <script src="./assets/king-cases/manifest.js?v=20260727-image-tiers-v1"></script>
     <script src="./storage-engine.js?v=20260727-blob-v1"></script>
