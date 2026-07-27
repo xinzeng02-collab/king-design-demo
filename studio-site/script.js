@@ -243,24 +243,24 @@ function pjFiltered() {
 function pjCardHtml(p) {
   const { done, total } = pjTaskStats(p);
   const unread = pjUnreadCount(p);
-  const pats = pjPatternsOf(p).length;
+  const pats = pjPatternsOf(p);
+  const cover = pats.find((c) => c.dataset.imageData)?.dataset.imageData || "";
   return `<article class="pj-card" draggable="${pjIsBoss() || (p.members || []).includes(pjMe()) || p.owner === pjMe()}" data-pj-card="${escapeHtml(p.id)}">
-    <div class="pj-card-top">
-      <strong>${escapeHtml(p.name)}</strong>
-      ${unread ? `<i class="pj-dot" title="有 ${unread} 条新动态"></i>` : ""}
-    </div>
-    <div class="pj-card-meta">
-      <span class="pj-type ${p.type === "定制" ? "custom" : ""}">${escapeHtml(p.type || "内部")}</span>
-      ${p.customer ? `<span class="pj-cust">${escapeHtml(p.customer)}</span>` : ""}
-    </div>
-    ${pjDueBadge(p)}
-    ${p.desc ? `<p class="pj-desc">${escapeHtml(p.desc)}</p>` : ""}
-    <div class="pj-card-foot">
-      ${pjAvatars([p.owner, ...(p.members || [])].filter(Boolean))}
-      <span class="pj-nums">
-        <i title="任务完成度">☑ ${done}/${total}</i>
-        <i title="本项目稿件">◈ ${pats}</i>
-      </span>
+    ${cover ? `<div class="pj-cover" style="background-image:url('${cover}')"></div>` : ""}
+    <div class="pj-card-in">
+      <div class="pj-card-top">
+        <strong>${escapeHtml(p.name)}</strong>
+        ${unread ? `<i class="pj-dot" title="有 ${unread} 条新动态"></i>` : ""}
+      </div>
+      ${pjDueBadge(p) || `<span class="pj-due">${escapeHtml(p.deadline || p.createdAt || "")}</span>`}
+      ${p.desc ? `<p class="pj-desc">${escapeHtml(p.desc)}</p>` : ""}
+      <div class="pj-card-foot">
+        ${pjAvatars([p.owner, ...(p.members || [])].filter(Boolean))}
+        <span class="pj-nums">
+          <i title="任务完成度"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8 12 3 3 5-5"/></svg>${done}/${total}</i>
+          <i title="本项目稿件"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.4"/><path d="m6 17 4-4 3 2.5 2-1.6 3 3.1"/></svg>${pats.length}</i>
+        </span>
+      </div>
     </div>
   </article>`;
 }
@@ -279,6 +279,24 @@ function pjPatternCardHtml(card) {
 function renderProjectsView() {
   const board = document.querySelector("#pjBoard");
   if (!board) return;
+  const statsEl = document.querySelector("#pjStats");
+  const toolbarEl = document.querySelector(".pj-toolbar");
+  // 一个项目都没有时：不显示统计和空看板，只给一个干净的引导页
+  if (!pjProjects.length) {
+    if (statsEl) statsEl.innerHTML = "";
+    if (toolbarEl) toolbarEl.style.display = "none";
+    board.className = "pj-empty-wrap";
+    board.innerHTML = `<div class="pj-empty">
+      <svg viewBox="0 0 24 24" class="pj-empty-ic"><rect x="4" y="5" width="5" height="14" rx="1"></rect><rect x="10.5" y="5" width="5" height="9" rx="1"></rect><rect x="17" y="5" width="3" height="12" rx="1"></rect></svg>
+      <h3>还没有项目</h3>
+      <p>接到新单子时在这里建项目：拉上设计师和手绘师、设定交期、上传客户资料，<br/>之后所有稿件和进度都会归到这个项目下。</p>
+      <button class="primary-button" id="pjEmptyNew" type="button">＋ 新建第一个项目</button>
+    </div>`;
+    board.querySelector("#pjEmptyNew")?.addEventListener("click", () => pjOpenForm(null));
+    return;
+  }
+  if (toolbarEl) toolbarEl.style.display = "";
+  board.className = "pj-board";
   // 负责人下拉
   const ownerSel = document.querySelector("#pjOwnerFilter");
   if (ownerSel && ownerSel.dataset.filled !== "1") {
@@ -291,25 +309,12 @@ function renderProjectsView() {
   }
   renderProjectStats();
 
-  if (pjLevel === "pattern") {
-    const stages = ["每日新稿", "出稿中", "往期修改", "打样", "已确认"];
-    const cards = [...workCards].filter((c) => !c.dataset.deletedAt);
-    board.innerHTML = stages.map((s) => {
-      const items = cards.filter((c) => pjPatternStage(c) === s);
-      return `<div class="pj-col" data-pj-pstage="${escapeHtml(s)}">
-        <div class="pj-col-head"><span>${s}</span><em>${items.length}</em></div>
-        <div class="pj-col-body">${items.slice(0, 40).map(pjPatternCardHtml).join("") || `<div class="pj-drop">拖动稿件到这里</div>`}</div>
-      </div>`;
-    }).join("");
-    return;
-  }
-
   const list = pjFiltered();
   board.innerHTML = PJ_STAGES.map((st) => {
     const items = list.filter((p) => (p.stage || PJ_STAGES[0].key) === st.key);
     return `<div class="pj-col" data-pj-stage="${escapeHtml(st.key)}">
-      <div class="pj-col-head"><span><i class="pj-col-dot" style="background:${st.color}"></i>${st.key}</span><em>${items.length}</em></div>
-      <div class="pj-col-body">${items.map(pjCardHtml).join("") || `<div class="pj-drop">拖动项目到这里</div>`}</div>
+      <div class="pj-col-head"><span>${st.key}</span><em>(${items.length})</em></div>
+      <div class="pj-col-body">${items.map(pjCardHtml).join("")}<div class="pj-drop">拖动项目到这里</div></div>
     </div>`;
   }).join("");
 }
@@ -325,15 +330,36 @@ function renderProjectStats() {
     const n = act.filter((p) => (p.stage || PJ_STAGES[0].key) === s.key).length;
     return { ...s, n, pct: act.length ? (n / act.length) * 100 : 0 };
   });
+  // 环形图：阶段占比
+  const R = 54, C = 2 * Math.PI * R;
+  let off = 0;
+  const rings = seg.filter((s) => s.n).map((s) => {
+    const len = C * (s.pct / 100);
+    const el = `<circle cx="70" cy="70" r="${R}" fill="none" stroke="${s.color}" stroke-width="16"
+      stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 70 70)"/>`;
+    off += len; return el;
+  }).join("");
   box.innerHTML = `
-    <div class="pj-stat"><div class="k">进行中项目</div><div class="v">${act.length}</div></div>
-    <div class="pj-stat"><div class="k">已到定稿</div><div class="v">${doneStage}</div></div>
-    <div class="pj-stat ${soon ? "warn" : ""}"><div class="k">7天内截止</div><div class="v">${soon}</div></div>
-    <div class="pj-stat ${overdue ? "over" : ""}"><div class="k">已逾期</div><div class="v">${overdue}</div></div>
-    <div class="pj-stat wide">
-      <div class="k">阶段分布</div>
-      <div class="pj-bar">${seg.map((s) => s.n ? `<i style="width:${s.pct}%;background:${s.color}" title="${s.key} ${s.n}"></i>` : "").join("")}</div>
-      <div class="pj-legend">${seg.map((s) => `<span><i style="background:${s.color}"></i>${s.key} ${s.n}</span>`).join("")}</div>
+    <div class="pj-stat pj-stat-ring">
+      <div class="pj-stat-h">阶段分布</div>
+      <div class="pj-ring-wrap">
+        <svg viewBox="0 0 140 140" class="pj-ring">
+          <circle cx="70" cy="70" r="${R}" fill="none" stroke="var(--color-border-subtle,#e7e5e4)" stroke-width="16"/>
+          ${rings}
+          <text x="70" y="66" text-anchor="middle" class="pj-ring-n">${act.length}</text>
+          <text x="70" y="84" text-anchor="middle" class="pj-ring-l">进行中</text>
+        </svg>
+        <div class="pj-legend">${seg.map((s) => `<span><i style="background:${s.color}"></i>${s.key}<em>${s.n}</em></span>`).join("")}</div>
+      </div>
+    </div>
+    <div class="pj-stat pj-stat-nums">
+      <div class="pj-stat-h">概览</div>
+      <div class="pj-num-grid">
+        <div><b>${act.length}</b><span>进行中</span></div>
+        <div><b>${doneStage}</b><span>已到定稿</span></div>
+        <div class="${soon ? "warn" : ""}"><b>${soon}</b><span>7天内截止</span></div>
+        <div class="${overdue ? "over" : ""}"><b>${overdue}</b><span>已逾期</span></div>
+      </div>
     </div>`;
 }
 
@@ -411,14 +437,16 @@ function pjRenderDetail(p) {
     <div class="pjd-grid">
       <div class="pjd-card">
         <div class="pjd-h">任务清单 ${canEdit ? `<button class="pjd-add" data-pj-addtask type="button">＋ 添加</button>` : ""}</div>
-        <div class="pjd-tasks">${(p.tasks || []).length ? (p.tasks || []).map((t, i) => `
+        ${(p.tasks || []).length ? `<div class="pjd-tasks">
+          <div class="pjd-thead"><span>任务</span><span>负责</span><span>创建于</span><span></span></div>
+          ${(p.tasks || []).map((t, i) => `
           <label class="pjd-task ${t.done ? "done" : ""}">
-            <input type="checkbox" data-pj-task="${i}" ${t.done ? "checked" : ""} ${canEdit || t.who === pjMe() ? "" : "disabled"}/>
-            <span class="pjd-task-t">${escapeHtml(t.text)}</span>
-            ${t.who ? pjAvatars([t.who]) : ""}
-            ${canEdit ? `<button class="pjd-task-x" data-pj-deltask="${i}" type="button">×</button>` : ""}
-          </label>`).join("") : `<p class="pjd-empty">还没有任务，点「＋ 添加」建立。</p>`}
-        </div>
+            <span class="pjd-task-t"><input type="checkbox" data-pj-task="${i}" ${t.done ? "checked" : ""} ${canEdit || t.who === pjMe() ? "" : "disabled"}/>${escapeHtml(t.text)}</span>
+            <span class="pjd-task-w">${t.who ? pjAvatars([t.who]) : "—"}</span>
+            <span class="pjd-task-d">${escapeHtml(t.at || "")}</span>
+            <span>${canEdit ? `<button class="pjd-task-x" data-pj-deltask="${i}" type="button">×</button>` : ""}</span>
+          </label>`).join("")}
+        </div>` : `<p class="pjd-empty">还没有任务，点「＋ 添加」建立。</p>`}
       </div>
       <div class="pjd-card">${pjCalendar(p)}</div>
     </div>
@@ -470,7 +498,7 @@ function pjBindDetail(p) {
   const body = document.getElementById("pjdBody");
   body.querySelector("[data-pj-addtask]")?.addEventListener("click", () => {
     const text = window.prompt("任务内容：", ""); if (!text) return;
-    p.tasks = p.tasks || []; p.tasks.push({ text: text.trim(), done: false, who: "" });
+    p.tasks = p.tasks || []; p.tasks.push({ text: text.trim(), done: false, who: pjMe(), at: formatDateTime() });
     pjPush(p, `新增任务：${text.trim()}`); pjSave(); pjRenderDetail(p); renderProjectsView();
   });
   body.querySelectorAll("[data-pj-task]").forEach((cb) => cb.addEventListener("change", () => {
@@ -625,11 +653,6 @@ function pjOpenArchive() {
 /* ---- 事件绑定 ---- */
 document.querySelector("#pjNew")?.addEventListener("click", () => pjOpenForm(null));
 document.querySelector("#pjOpenArchive")?.addEventListener("click", pjOpenArchive);
-document.querySelectorAll("[data-pj-level]").forEach((b) => b.addEventListener("click", () => {
-  pjLevel = b.dataset.pjLevel;
-  document.querySelectorAll("[data-pj-level]").forEach((x) => x.classList.toggle("on", x === b));
-  renderProjectsView();
-}));
 ["#pjTypeFilter", "#pjOwnerFilter"].forEach((s) => document.querySelector(s)?.addEventListener("change", renderProjectsView));
 document.querySelector("#pjSearch")?.addEventListener("input", renderProjectsView);
 
