@@ -1,0 +1,9 @@
+{
+  "name": "king-design-studio-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:syntax": "node --check script.js && node --check login-portals.js && node --check storage-engine.js && node --check performance-runtime.js"
+  }
+}

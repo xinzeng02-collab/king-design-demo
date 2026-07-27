@@ -4,19 +4,18 @@ const titleMap = {
   projects: "项目进度",
   team: "我的团队",
   designer: "设计师个人界面",
+  resources: "资源库",
   library: "客户中心",
   cart: "选稿车",
   orders: "订单中心",
   sleep: "稿件休眠区",
   recycle: "回收站",
-  sampling: "打样管理",
 };
 
 const roleDashboardTitles = {
   管理员: "管理员总控制台",
   设计师: "设计师总控制台",
   手绘师: "手绘师总控制台",
-  打样师: "打样师总控制台",
   销售: "销售总控制台",
 };
 
@@ -24,7 +23,6 @@ const demoAccounts = {
   admin: { password: "admin123", role: "管理员", name: "管理员 / 总控", ownerKey: "admin" },
   designer: { password: "designer123", role: "设计师", name: "许然 / 设计师", ownerKey: "designer" },
   painter: { password: "painter123", role: "手绘师", name: "阿沁 / 手绘师", ownerKey: "painter" },
-  sampler: { password: "sampler123", role: "打样师", name: "陈一 / 打样师", ownerKey: "sampler" },
   sales: { password: "sales123", role: "销售", name: "沈黎 / 销售", ownerKey: "sales" },
 };
 
@@ -50,7 +48,6 @@ function roleSubtitle(role) {
     管理员: "Administrator",
     设计师: "Designer",
     手绘师: "Painter",
-    打样师: "Sampler",
     销售: "Sales",
   };
   return map[role] || "Team";
@@ -63,10 +60,11 @@ function applyProfilePrefs(account) {
   currentAccount.name = displayName;
   if (profileNameInput) profileNameInput.textContent = displayName;
   if (profileRoleLabel) profileRoleLabel.textContent = `${account.ownerKey} ${roleSubtitle(account.role)}`;
-  if (userBadge) userBadge.textContent = displayName;
+  if (userBadge) if (userBadge) userBadge.textContent = displayName;
   if (!profileAvatar) return;
-  profileAvatar.textContent = profile.avatar ? "" : displayInitial(displayName);
-  profileAvatar.style.backgroundImage = profile.avatar ? `url("${profile.avatar}")` : "";
+  const avatarSource = profile.avatar || ROLE_AVATARS[account.role] || "";
+  profileAvatar.textContent = avatarSource ? "" : displayInitial(displayName);
+  profileAvatar.style.backgroundImage = avatarSource ? `url("${avatarSource}")` : "";
 }
 
 function saveCurrentProfilePatch(patch) {
@@ -80,6 +78,7 @@ function saveCurrentProfilePatch(patch) {
 const STORAGE_KEY = "studio_site_design_ops_v2";
 const SEED_VERSION = "library-2026-07-23c";
 const SEED_VERSION_KEY = "studio_site_seed_version";
+const LEGACY_AUTO_PRICE_MIGRATION_KEY = "studio_site_no_default_price_v1";
 const PROFILE_KEY = "studio_site_profile_prefs_v1";
 const REGISTERED_ACCOUNT_KEY = "studio_site_registered_accounts_v1";
 const SESSION_KEY = "studio_site_active_account_v1";
@@ -87,8 +86,12 @@ const SESSION_ACCOUNT_DATA_KEY = "studio_site_active_account_data_v1";
 const REMEMBERED_LOGIN_KEY = "studio_site_remembered_login_v1";
 const PROJECT_DRAFT_KEY = "studio_site_project_drafts_v1";
 const MAX_UPLOAD_FILES = 50;
+const MAX_IMAGE_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_SOURCE_FILE_BYTES = 250 * 1024 * 1024;
+const MAX_DOCUMENT_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_RESOURCE_FILE_BYTES = 100 * 1024 * 1024;
 const IMAGE_DB_NAME = "studio_site_design_images";
-const IMAGE_DB_VERSION = 1;
+const IMAGE_DB_VERSION = 2;
 
 function readRegisteredAccounts() {
   try {
@@ -114,13 +117,13 @@ const passwordInput = document.querySelector("#password");
 const employeeLoginPanel = document.querySelector("#employeeLoginPanel");
 const clientLoginPanel = document.querySelector("#clientLoginPanel");
 const employeeRememberPassword = document.querySelector("#employeeRememberPassword");
-const openClientLogin = document.querySelector("#openClientLogin");
-const openEmployeeLogin = document.querySelector("#openEmployeeLogin");
 const clientLoginForm = document.querySelector("#clientLoginForm");
 const clientUsername = document.querySelector("#clientUsername");
 const clientPassword = document.querySelector("#clientPassword");
 const clientRememberPassword = document.querySelector("#clientRememberPassword");
 const clientLoginError = document.querySelector("#clientLoginError");
+const appLoadingOverlay = document.querySelector("#appLoadingOverlay");
+const appLoadingText = document.querySelector("#appLoadingText");
 const openAccountApplication = document.querySelector("#openAccountApplication");
 const accountApplicationModal = document.querySelector("#accountApplicationModal");
 const closeAccountApplication = document.querySelector("#closeAccountApplication");
@@ -517,7 +520,11 @@ let globalSearchMatches = [];
 let projectBoardOverrides = {};
 let draggingProjectPayload = null;
 let pendingProjectLifecycleAction = null;
-let pendingProjectLifecycleFiles = [];
+let initialImageHydration = Promise.resolve();
+let resourceFolders = [];
+let teamResources = [];
+let activeResourceFolder = "all";
+let resourceSearchText = "";
 let studioState = {
   createdWorks: [],
   overrides: {},
@@ -530,7 +537,10 @@ let studioState = {
   teamMembers: [],
   pendingTags: [],
   dismissedNotifications: [],
+  resourceFolders: [],
+  resources: [],
 };
+let lastPersistedStateJson = "";
 const defaultOrders = [];
 const teamMembers = [
   { name: "许然", role: "设计师", ownerKey: "designer", tone: "blue", baseLoadScore: 2, accountStatus: "正常" },
@@ -543,10 +553,10 @@ const teamMembers = [
 ];
 // 按角色对应的像素头像（放在 assets/avatars/ 下）；文件缺失时自动回退到首字母。
 const ROLE_AVATARS = {
-  "管理员": "./assets/avatars/admin.png",
-  "设计师": "./assets/avatars/designer.png",
-  "手绘师": "./assets/avatars/painter.png",
-  "销售": "./assets/avatars/sales.png",
+  "管理员": "./assets/avatars/admin.webp",
+  "设计师": "./assets/avatars/designer.webp",
+  "手绘师": "./assets/avatars/painter.webp",
+  "销售": "./assets/avatars/sales.webp",
 };
 function memberAvatarInner(member) {
   const src = ROLE_AVATARS[member.role];
@@ -584,40 +594,6 @@ function syncRegisteredAccountsToTeam() {
 }
 const pendingTagApplications = [];
 const retiredDefaultTags = ["花卉", "几何", "清新", "轻奢", "儿童", "秋冬", "手绘", "四件套"];
-const painterLibrary = [
-  {
-    file: "K-NTTM0009",
-    painter: "阿沁",
-    title: "暖调藤蔓手绘稿",
-    project: "春夏清透花卉四件套系列",
-    tags: ["手绘", "藤蔓", "花卉"],
-    pattern: "pattern-c",
-  },
-  {
-    file: "K-SCZY0010",
-    painter: "阿沁",
-    title: "水彩枝叶元素组",
-    project: "客户 A 春夏加购方案",
-    tags: ["手绘", "枝叶", "清新"],
-    pattern: "pattern-a",
-  },
-  {
-    file: "K-XHSD0011",
-    painter: "阿沁",
-    title: "小花散点手绘稿",
-    project: "自主图库补充",
-    tags: ["手绘", "小花", "散点"],
-    pattern: "pattern-d",
-  },
-  {
-    file: "K-HYSD0012",
-    painter: "周禾",
-    title: "手绘花园散点元素",
-    project: "秋冬暖调植物图库扩充",
-    tags: ["手绘", "花园", "秋冬"],
-    pattern: "pattern-d",
-  },
-];
 const projectLibrary = [
   { name: "春夏清透花卉四件套系列", status: "出稿评审", members: "许然、阿沁、周禾、陈一" },
   { name: "轻奢几何客户定制项目", status: "修改复审", members: "林若、孟禾、陈一" },
@@ -634,8 +610,6 @@ const projectBoardStages = [
   { status: "稿件评审", color: "#f59e0b" },
   { status: "修改完善", color: "#ec4899" },
   { status: "内部定稿", color: "#10b981" },
-  { status: "待交付", color: "#64748b" },
-  { status: "已交付", color: "#111827" },
 ];
 const defaultBoardProjects = [];
 const baseProjectNames = new Set(projectLibrary.map((item) => item.name));
@@ -704,14 +678,15 @@ async function seedKingCaseLibrary() {
       const designer = designers[stableCaseIndex(sourceProject.name, designers.length)];
       const projectId = `CASE-${String(projectIndex + 1).padStart(2, "0")}`;
       if (!customProjects.some((project) => project.id === projectId)) {
-        const firstImage = sourceProject.patterns?.[0]?.images?.[0] || "";
+        const firstPattern = sourceProject.patterns?.[0];
+        const firstImage = firstPattern?.thumbs?.[0] || firstPattern?.images?.[0] || "";
         customProjects.push({
           id: projectId,
           name: sourceProject.source === "每日新稿" ? `每日新稿 · ${sourceProject.name}` : sourceProject.name,
           customer: ["每日新稿", "往期修改", "打样"].includes(sourceProject.source) ? "非客户项目" : sourceProject.name,
           type: ["每日新稿", "往期修改", "打样"].includes(sourceProject.source) ? "内部" : "定制",
           status: sourceProject.status || "需求确认",
-          files: firstImage ? [{ name: `${sourceProject.name}-项目缩略图.jpg`, type: "image/jpeg", dataUrl: firstImage, uploader: designer.name, time: "2026-07-22" }] : [],
+          files: firstImage ? [{ name: `${sourceProject.name}-项目缩略图.webp`, type: "image/webp", dataUrl: firstImage, uploader: designer.name, time: "2026-07-22" }] : [],
           designers: [designer.name],
           painters: [],
           owners: [designer.name],
@@ -749,8 +724,8 @@ async function seedKingCaseLibrary() {
           colors: thumbs.length,
           tags: caseSeedTags(pattern.code, isPainter),
           imageKey: thumbs[0],
-          imageData: thumbs[0],
           paletteKeys: JSON.stringify(previews),
+          paletteThumbKeys: JSON.stringify(thumbs),
           paletteFiles: JSON.stringify(paletteFiles),
           title: pattern.code,
           project: sourceProject.source === "每日新稿" ? `每日新稿 · ${sourceProject.name}` : sourceProject.name,
@@ -781,6 +756,14 @@ async function seedKingCaseLibrary() {
   }
 }
 
+let caseLibraryReadyPromise = null;
+function ensureCaseLibraryReady() {
+  if (!caseLibraryReadyPromise) {
+    caseLibraryReadyPromise = new Promise((resolve) => requestAnimationFrame(resolve)).then(() => seedKingCaseLibrary());
+  }
+  return caseLibraryReadyPromise;
+}
+
 function syncCustomerOptions() {
   customCustomers.forEach((customer) => {
     if (!customer?.name) return;
@@ -793,7 +776,7 @@ function syncCustomerOptions() {
 
 function projectStatusClass(status) {
   if (status === "已关闭") return "closed";
-  if (status === "内部定稿" || status === "待交付" || status === "已交付" || status === "定稿交付" || status === "已完成") return "done";
+  if (status === "内部定稿" || status === "定稿交付" || status === "已完成") return "done";
   if (status === "设计制作" || status === "稿件评审" || status === "执行中") return "working";
   return "waiting";
 }
@@ -813,8 +796,10 @@ function normalizeProjectBoardStatus(status) {
     打样确认: "内部定稿",
     定稿交付: "内部定稿",
     已完成: "内部定稿",
-    交付准备: "待交付",
-    交付完成: "已交付",
+    待交付: "内部定稿",
+    已交付: "内部定稿",
+    交付准备: "内部定稿",
+    交付完成: "内部定稿",
   };
   return projectBoardStages.some((stage) => stage.status === status) ? status : map[status] || "需求确认";
 }
@@ -832,11 +817,21 @@ function setProjectStage(project, stage) {
 
 function normalizeProjectLifecycleProject(project) {
   if (!project || typeof project !== "object") return project;
+  const legacyStage = String(project.stage || project.status || "需求确认");
+  const wasDelivered = ["已交付", "交付完成"].includes(legacyStage);
   setProjectStage(project, project.stage || project.status || "需求确认");
   project.projectResult = ["completed", "cancelled", "terminated"].includes(project.projectResult) ? project.projectResult : null;
+  if (wasDelivered && !project.projectResult) {
+    const completedAt = project.deliveredAt || project.completedAt || formatDateTime();
+    project.projectResult = "completed";
+    project.completedAt = completedAt;
+    project.archivedAt = project.archivedAt || completedAt;
+    project.archivedFromStage = "内部定稿";
+    project.archiveReason = project.archiveReason || "历史已交付项目已完成";
+  }
   project.archived = Boolean(project.archived || project.projectResult);
   project.projectStatus = project.projectStatus === "paused" ? "paused" : "normal";
-  project.deliveryStatus = project.deliveryStatus || (projectStage(project) === "已交付" ? "delivered" : "pending");
+  project.deliveryStatus = project.deliveryStatus || (wasDelivered ? "delivered" : "pending");
   project.deliveryFiles = Array.isArray(project.deliveryFiles) ? project.deliveryFiles : [];
   project.deliveryNote = project.deliveryNote || "";
   project.deliveryReceiver = project.deliveryReceiver || "";
@@ -860,9 +855,12 @@ function projectRuntimeStatus(project) {
 
 function projectStatusDisplay(project) {
   const runtimeStatus = projectRuntimeStatus(project);
+  const remainingDays = daysUntil(project?.endAt);
   if (runtimeStatus === "paused") return { key: "paused", label: "暂停中" };
-  if (runtimeStatus === "overdue") return { key: "overdue", label: `已逾期 ${Math.abs(daysUntil(project.endAt))} 天` };
-  if (runtimeStatus === "due-soon") return { key: "due-soon", label: "即将到期" };
+  if (runtimeStatus === "overdue") return { key: "overdue", label: `已逾期 ${Math.abs(remainingDays)} 天` };
+  if (runtimeStatus === "due-soon") {
+    return { key: "due-soon", label: remainingDays === 0 ? "今天到期" : `${remainingDays} 天后到期` };
+  }
   return { key: "normal", label: "正常" };
 }
 
@@ -878,13 +876,6 @@ function canManageProjectLifecycle(project) {
   return Boolean(name && ([...(project?.owners || []), ...String(project?.owner || "").split("、")].includes(name)));
 }
 
-function projectHasValidDelivery(project) {
-  return project?.deliveryStatus === "delivered"
-    && Boolean(project.deliveredAt)
-    && Array.isArray(project.deliveryFiles)
-    && project.deliveryFiles.length > 0;
-}
-
 function projectProgressWidth(status) {
   const widths = {
     需求确认: 14,
@@ -892,10 +883,8 @@ function projectProgressWidth(status) {
     设计制作: 46,
     稿件评审: 58,
     修改完善: 72,
-    内部定稿: 76,
-    待交付: 88,
-    已交付: 100,
-    定稿交付: 76,
+    内部定稿: 100,
+    定稿交付: 100,
     新建: 14,
     策划中: 25,
     执行中: 46,
@@ -929,7 +918,6 @@ function projectVisibleForCurrentAccount(project) {
   if (!name) return false;
   if (currentAccount.role === "设计师") return (project.designers || []).includes(name) || project.owner === name;
   if (currentAccount.role === "手绘师") return (project.painters || []).includes(name) || project.owner === name;
-  if (currentAccount.role === "打样师") return project.owner === name || String(project.members || "").includes(name);
   return false;
 }
 
@@ -950,7 +938,7 @@ function selectedProjectTypeFilters() {
 function renderProjectTypeFilterSummary() {
   if (!projectTypeFilterSummary) return;
   const selected = selectedProjectTypeFilters();
-  projectTypeFilterSummary.textContent = selected.length === 3 ? "全部类型" : selected.length ? selected.map((type) => type === "内部" ? "内部项目" : type === "定制" ? "定制项目" : type).join("、") : "未选择类型";
+  if (projectTypeFilterSummary) projectTypeFilterSummary.textContent = selected.length === 3 ? "全部类型" : selected.length ? selected.map((type) => type === "内部" ? "内部项目" : type === "定制" ? "定制项目" : type).join("、") : "未选择类型";
 }
 
 function projectVisibleOnBoard(project) {
@@ -993,17 +981,32 @@ function mergedBoardProjects() {
   });
 }
 
+function projectBoardThumbnailSource(value) {
+  const source = String(value || "").trim();
+  if (!source || !/\/assets\/king-cases\//i.test(source)) return source;
+  if (/\/assets\/king-cases\/_(?:thumbs|previews)\//i.test(source)) {
+    return normalizeLegacyDerivativePath(source);
+  }
+  return source
+    .replace(/\/assets\/king-cases\//i, "/assets/king-cases/_thumbs/")
+    .replace(/\.(?:jpe?g|png|tiff?)(?=([?#]|$))/i, ".webp");
+}
+
 function projectBoardThumbnailHtml(project) {
   const image = projectFileEntries(project).find((file) => file.dataUrl && (String(file.type || "").startsWith("image/") || /\.(jpe?g|png)$/i.test(file.name || "")));
+  const thumbnailSource = projectBoardThumbnailSource(image?.dataUrl);
   return image
-    ? `<span class="project-kanban-thumbnail"><img src="${escapeHtml(image.dataUrl)}" alt="${escapeHtml(project.name)} 项目缩略图" /></span>`
+    ? `<span class="project-kanban-thumbnail"><img src="${escapeHtml(thumbnailSource)}" alt="${escapeHtml(project.name)} 项目缩略图" loading="lazy" decoding="async" fetchpriority="low" /></span>`
     : `<span class="project-kanban-thumbnail empty" aria-label="暂无项目缩略图">无</span>`;
 }
 
 function projectAvatarHtml(project) {
   const members = Array.isArray(project.members) ? project.members : String(project.members || "").split("、").filter(Boolean);
   return `<div class="project-avatar-row">
-    ${members.slice(0, 2).map((name, index) => `<span class="project-mini-avatar ${index % 2 ? "hot" : ""}">${escapeHtml(String(name).slice(0, 1))}</span>`).join("")}
+    ${members.slice(0, 2).map((name, index) => {
+      const member = teamMembers.find((item) => item.name === name) || { name, role: "设计师" };
+      return `<span class="project-mini-avatar ${index % 2 ? "hot" : ""}">${memberAvatarInner(member)}</span>`;
+    }).join("")}
   </div>`;
 }
 
@@ -1014,12 +1017,12 @@ function projectBoardCardHtml(project) {
   const projectId = project.id;
   const canOpen = source === "custom" ? ` data-project-view="${escapeHtml(projectId)}"` : "";
   const runtime = projectStatusDisplay(project);
-  const dateText = runtime.key === "overdue" || runtime.key === "paused" ? runtime.label : project.due || project.endAt || "未定";
+  const dateText = runtime.key === "normal" ? project.due || project.endAt || "未定" : runtime.label;
   const customerText = project.customer === "内部图库 / 非客户项目" ? "非客户项目" : project.customer || project.owner || "未关联客户";
   return `<article class="project-kanban-card project-status-${runtime.key} ${isClosed ? "project-closed" : ""}" draggable="${draggable}" data-board-project="${escapeHtml(projectId)}" data-project-source="${escapeHtml(source)}"${canOpen}>
     <div class="project-kanban-head">
       <strong>${escapeHtml(project.name)}</strong>
-      <time class="${runtime.key === "overdue" || runtime.key === "paused" ? "project-state-date" : ""}">${escapeHtml(dateText)}</time>
+      <time class="${runtime.key !== "normal" ? "project-state-date" : ""}">${escapeHtml(dateText)}</time>
     </div>
     <div class="project-kanban-meta"><span>${escapeHtml(projectTypeValue(project) === "内部" ? "内部项目" : projectTypeValue(project))}</span><em>·</em><span>负责人：${escapeHtml(project.owner || "未指定")}</span></div>
     ${projectBoardThumbnailHtml(project)}
@@ -1058,23 +1061,7 @@ function moveProjectToStage(payload, nextStatus) {
       showToast("暂停中的项目需要先恢复，才能调整阶段。", "warning");
       return;
     }
-    if (nextStatus === "已交付") {
-      showToast("请在项目详情中完成交付记录后进入“已交付”。", "warning");
-      return;
-    }
     const previousStatus = projectStage(project);
-    if (previousStatus === "已交付") {
-      showToast("已交付项目请使用“重新打开交付”退回待交付。", "warning");
-      return;
-    }
-    if (nextStatus === "待交付" && previousStatus !== "内部定稿") {
-      showToast("只有内部定稿项目可以进入待交付。", "warning");
-      return;
-    }
-    if (previousStatus === "待交付" && nextStatus !== "内部定稿") {
-      showToast("待交付项目只能确认交付，或退回内部定稿。", "warning");
-      return;
-    }
     if (previousStatus === nextStatus) return;
     setProjectStage(project, nextStatus);
     project.changeLogs = [
@@ -1107,7 +1094,7 @@ function editableOptions(kind) {
     return projectLibrary.map((item) => item.name);
   }
   if (kind === "painter") {
-    return ["无引用 / 原创设计", ...painterLibrary.map((item) => `${item.painter} / ${item.title}`)];
+    return ["无引用 / 原创设计", ...painterWorkCatalog().map((item) => `${item.painter} / ${item.title}`)];
   }
   return [];
 }
@@ -1173,6 +1160,7 @@ function editReviewTags(target) {
 
 function refreshWorkCards() {
   workCards = document.querySelectorAll("[data-work-role]");
+  invalidateCardIndex();
 }
 
 function fileBaseName(fileName) {
@@ -1230,7 +1218,113 @@ function readFileAsDataURL(file) {
   });
 }
 
+function readableFileSize(bytes) {
+  const value = Number(bytes || 0);
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))}KB`;
+  return `${(value / 1024 / 1024).toFixed(value >= 10 * 1024 * 1024 ? 0 : 1)}MB`;
+}
+
+function uploadFileExtension(file) {
+  return String(file?.name || "").split(".").pop().toLowerCase();
+}
+
+function acceptedUploadFiles(files, {
+  label = "文件",
+  maxBytes = MAX_RESOURCE_FILE_BYTES,
+  extensions = [],
+  imageOnly = false,
+  maxCount = MAX_UPLOAD_FILES,
+} = {}) {
+  const list = [...(files || [])];
+  const allowed = new Set(extensions.map((item) => item.toLowerCase().replace(/^\./, "")));
+  const accepted = [];
+  for (const file of list) {
+    const ext = uploadFileExtension(file);
+    if ((imageOnly && !file.type.startsWith("image/")) || (allowed.size && !allowed.has(ext))) {
+      showToast(`${file.name} 格式不支持，请重新选择。`, "warning");
+      continue;
+    }
+    const effectiveMax = ["ps", "psd", "ai", "tif", "tiff"].includes(ext)
+      ? MAX_SOURCE_FILE_BYTES
+      : maxBytes;
+    if (file.size > effectiveMax) {
+      showToast(`${file.name} 为 ${readableFileSize(file.size)}，${label}单个文件不能超过 ${readableFileSize(effectiveMax)}。`, "warning");
+      continue;
+    }
+    accepted.push(file);
+  }
+  if (accepted.length > maxCount) {
+    showToast(`一次最多选择 ${maxCount} 个文件，其余文件未加入。`, "warning");
+  }
+  return accepted.slice(0, maxCount);
+}
+
+function canvasBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("图片压缩失败")), type, quality);
+  });
+}
+
+async function createImageVariantBlob(file, maxSize, square = false, quality = 0.84) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const sourceWidth = bitmap.width;
+    const sourceHeight = bitmap.height;
+    const canvas = document.createElement("canvas");
+    let drawWidth;
+    let drawHeight;
+    let offsetX = 0;
+    let offsetY = 0;
+    if (square) {
+      canvas.width = maxSize;
+      canvas.height = maxSize;
+      const scale = Math.max(maxSize / sourceWidth, maxSize / sourceHeight);
+      drawWidth = sourceWidth * scale;
+      drawHeight = sourceHeight * scale;
+      offsetX = (maxSize - drawWidth) / 2;
+      offsetY = (maxSize - drawHeight) / 2;
+    } else {
+      const scale = Math.min(1, maxSize / Math.max(sourceWidth, sourceHeight));
+      drawWidth = Math.max(1, Math.round(sourceWidth * scale));
+      drawHeight = Math.max(1, Math.round(sourceHeight * scale));
+      canvas.width = drawWidth;
+      canvas.height = drawHeight;
+    }
+    const context = canvas.getContext("2d", { alpha: false });
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, offsetX, offsetY, drawWidth, drawHeight);
+    return await canvasBlob(canvas, "image/webp", quality);
+  } finally {
+    bitmap.close?.();
+  }
+}
+
+async function persistArtworkImageTiers(baseKey, file) {
+  const originalKey = `${baseKey}__original`;
+  const previewKey = `${baseKey}__preview`;
+  await saveImageToDB(originalKey, file);
+  try {
+    const [thumbBlob, previewBlob] = await Promise.all([
+      createImageVariantBlob(file, 640, true, 0.78),
+      createImageVariantBlob(file, 1800, false, 0.86),
+    ]);
+    await Promise.all([
+      saveImageToDB(baseKey, thumbBlob),
+      saveImageToDB(previewKey, previewBlob),
+    ]);
+  } catch (error) {
+    console.warn("图片衍生图生成失败，已回退到原文件。", error);
+    await Promise.all([
+      saveImageToDB(baseKey, file),
+      saveImageToDB(previewKey, file),
+    ]);
+  }
+  return { originalKey, thumbKey: baseKey, previewKey };
+}
+
 function openImageDB() {
+  if (window.KingBlobStore?.open) return window.KingBlobStore.open();
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(IMAGE_DB_NAME, IMAGE_DB_VERSION);
     request.onupgradeneeded = () => {
@@ -1246,6 +1340,13 @@ function openImageDB() {
 
 async function saveImageToDB(key, imageData) {
   if (!imageData) return;
+  if (window.KingBlobStore?.put) {
+    await window.KingBlobStore.put(key, imageData, {
+      name: imageData?.name || "",
+      type: imageData?.type || "",
+    });
+    return;
+  }
   const database = await openImageDB();
   await new Promise((resolve, reject) => {
     const tx = database.transaction("images", "readwrite");
@@ -1258,6 +1359,7 @@ async function saveImageToDB(key, imageData) {
 
 async function getImageFromDB(key) {
   if (!key) return "";
+  if (window.KingBlobStore?.getUrl) return window.KingBlobStore.getUrl(key);
   const database = await openImageDB();
   const result = await new Promise((resolve, reject) => {
     const tx = database.transaction("images", "readonly");
@@ -1274,8 +1376,63 @@ function isDirectImageSource(key) {
   return /^(data:|blob:|https?:|file:|\.{0,2}\/|assets\/)/i.test(source);
 }
 
+function normalizeLegacyDerivativePath(value) {
+  const source = String(value || "").trim();
+  if (!source || !/\/_(?:thumbs|previews)\//i.test(source)) return source;
+  return source.replace(/\.(?:jpe?g|png|tiff?)(?=([?#]|$))/i, ".webp");
+}
+
+function normalizeStoredImageKeyList(value) {
+  if (!value) return value;
+  try {
+    const keys = JSON.parse(value);
+    return Array.isArray(keys)
+      ? JSON.stringify(keys.map(normalizeLegacyDerivativePath))
+      : value;
+  } catch {
+    return value;
+  }
+}
+
+function normalizeStoredPaletteFiles(value) {
+  if (!value) return value;
+  try {
+    const files = JSON.parse(value);
+    return Array.isArray(files)
+      ? JSON.stringify(files.map((file) => ({ ...file, key: normalizeLegacyDerivativePath(file?.key) })))
+      : value;
+  } catch {
+    return value;
+  }
+}
+
+function normalizeStoredWorkImageReferences(work) {
+  if (!work || typeof work !== "object") return work;
+  work.imageKey = normalizeLegacyDerivativePath(work.imageKey);
+  work.imageData = normalizeLegacyDerivativePath(work.imageData);
+  work.paletteKeys = normalizeStoredImageKeyList(work.paletteKeys);
+  work.paletteThumbKeys = normalizeStoredImageKeyList(work.paletteThumbKeys);
+  work.paletteFiles = normalizeStoredPaletteFiles(work.paletteFiles);
+  if (!work.paletteThumbKeys && /\/_thumbs\//i.test(work.imageKey || "")) {
+    work.paletteThumbKeys = JSON.stringify([work.imageKey]);
+  }
+  return work;
+}
+
+function cardPreviewSource(card) {
+  if (!card) return "";
+  if (card.dataset.imageData) {
+    const normalizedData = normalizeLegacyDerivativePath(card.dataset.imageData);
+    if (normalizedData !== card.dataset.imageData) card.dataset.imageData = normalizedData;
+    return normalizedData;
+  }
+  const key = normalizeLegacyDerivativePath(card.dataset.imageKey);
+  if (key && key !== card.dataset.imageKey) card.dataset.imageKey = key;
+  return isDirectImageSource(key) ? key : "";
+}
+
 function resolveImageSource(key) {
-  const source = String(key || "").trim();
+  const source = normalizeLegacyDerivativePath(key);
   if (!source) return Promise.resolve("");
   if (isDirectImageSource(source)) {
     try {
@@ -1297,6 +1454,7 @@ function cardToData(card) {
     tags: card.dataset.tags || "",
     imageKey: card.dataset.imageKey || "",
     paletteKeys: card.dataset.paletteKeys || "",
+    paletteThumbKeys: card.dataset.paletteThumbKeys || "",
     paletteFiles: card.dataset.paletteFiles || "",
     referenceKeys: card.dataset.referenceKeys || "",
     sourceFileName: card.dataset.sourceFileName || "",
@@ -1330,6 +1488,7 @@ function loadStudioState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
+      lastPersistedStateJson = raw;
       studioState = { ...studioState, ...JSON.parse(raw) };
       (studioState.globalTags || []).filter((tag) => !retiredDefaultTags.includes(tag)).forEach((tag) => {
         if (!globalTags.includes(tag)) globalTags.push(tag);
@@ -1342,6 +1501,8 @@ function loadStudioState() {
       normalizeProjectLifecycleData();
       customCustomers = Array.isArray(studioState.customers) ? studioState.customers : [];
       projectBoardOverrides = studioState.projectBoardOverrides || {};
+      resourceFolders = Array.isArray(studioState.resourceFolders) ? studioState.resourceFolders : [];
+      teamResources = Array.isArray(studioState.resources) ? studioState.resources : [];
       if (Array.isArray(studioState.teamMembers) && studioState.teamMembers.length) {
         // 过滤掉 zx 测试账号，并按 ownerKey/姓名去重，避免重复累积。
         const seen = new Set();
@@ -1364,18 +1525,59 @@ function loadStudioState() {
   }
 }
 
-/* 防抖保存：整库序列化（数百张卡）很重，合并 300ms 内的多次调用，避免每个操作都卡一下。
-   页面隐藏/关闭前会立即落盘，不会丢数据。 */
+/* 增量保存：只重新读取发生变化的作品卡片；非作品数据仍沿用现有存储结构。 */
 let _saveTimer = null;
+const workRecordCache = new Map();
+const dirtyWorkFiles = new Set();
+let workRecordCacheReady = false;
+
+function markWorkRecordDirty(card) {
+  const file = card?.dataset?.file;
+  if (file) dirtyWorkFiles.add(file);
+}
+
+function syncDirtyWorkRecords() {
+  if (!workRecordCacheReady) {
+    workCards.forEach((card) => workRecordCache.set(card.dataset.file, cardToData(card)));
+    workRecordCacheReady = true;
+    dirtyWorkFiles.clear();
+    return;
+  }
+  const currentFiles = new Set();
+  workCards.forEach((card) => {
+    const file = card.dataset.file;
+    currentFiles.add(file);
+    if (dirtyWorkFiles.has(file) || !workRecordCache.has(file)) {
+      workRecordCache.set(file, cardToData(card));
+    }
+  });
+  [...workRecordCache.keys()].forEach((file) => {
+    if (!currentFiles.has(file)) workRecordCache.delete(file);
+  });
+  dirtyWorkFiles.clear();
+}
+
 function saveStudioState() {
-  if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => { _saveTimer = null; saveStudioStateNow(); }, 300);
+  if (_saveTimer) {
+    if (window.KingPerformance?.cancelIdle) window.KingPerformance.cancelIdle(_saveTimer);
+    else clearTimeout(_saveTimer);
+  }
+  const schedule = window.KingPerformance?.idle || ((callback) => setTimeout(callback, 80));
+  _saveTimer = schedule(() => {
+    _saveTimer = null;
+    saveStudioStateNow();
+  }, 800);
   return true;
 }
 function flushStudioState() {
-  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; saveStudioStateNow(); }
+  if (_saveTimer) {
+    if (window.KingPerformance?.cancelIdle) window.KingPerformance.cancelIdle(_saveTimer);
+    else clearTimeout(_saveTimer);
+    _saveTimer = null;
+    saveStudioStateNow();
+  }
 }
-window.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushStudioState(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushStudioState(); });
 window.addEventListener("pagehide", flushStudioState);
 window.addEventListener("beforeunload", flushStudioState);
 
@@ -1384,8 +1586,8 @@ function saveStudioStateNow() {
   const createdWorks = [];
   const removedFiles = studioState.removedFiles || [];
 
-  workCards.forEach((card) => {
-    const data = cardToData(card);
+  syncDirtyWorkRecords();
+  workRecordCache.forEach((data) => {
     if (data.generated) {
       createdWorks.push(data);
     } else {
@@ -1395,6 +1597,7 @@ function saveStudioStateNow() {
         tags: data.tags,
         imageKey: data.imageKey,
         paletteKeys: data.paletteKeys,
+        paletteThumbKeys: data.paletteThumbKeys,
         paletteFiles: data.paletteFiles,
         referenceKeys: data.referenceKeys,
         sourceFileName: data.sourceFileName,
@@ -1413,14 +1616,52 @@ function saveStudioStateNow() {
     }
   });
 
-  studioState = { createdWorks, overrides, removedFiles, globalTags, pendingTags: pendingTagApplications, dismissedNotifications: [...dismissedNotifications], orders: studioOrders, projects: customProjects, customers: customCustomers, projectBoardOverrides, teamMembers };
+  studioState = {
+    createdWorks,
+    overrides,
+    removedFiles,
+    globalTags,
+    pendingTags: pendingTagApplications,
+    dismissedNotifications: [...dismissedNotifications],
+    orders: studioOrders,
+    projects: customProjects,
+    customers: customCustomers,
+    projectBoardOverrides,
+    teamMembers,
+    resourceFolders,
+    resources: teamResources,
+  };
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(studioState));
+    const nextStateJson = JSON.stringify(studioState);
+    if (nextStateJson === lastPersistedStateJson) return true;
+    localStorage.setItem(STORAGE_KEY, nextStateJson);
+    lastPersistedStateJson = nextStateJson;
     return true;
   } catch (error) {
     console.warn("Studio state save failed", error);
     return false;
   }
+}
+
+if (worksBoard && "MutationObserver" in window) {
+  const workMutationObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (
+        mutation.type === "attributes"
+        && mutation.target instanceof HTMLImageElement
+        && ["src", "style", "class", "data-image-queued"].includes(mutation.attributeName)
+      ) return;
+      markWorkRecordDirty(mutation.target.nodeType === Node.ELEMENT_NODE
+        ? mutation.target.closest?.("[data-work-role]")
+        : mutation.target.parentElement?.closest("[data-work-role]"));
+    });
+  });
+  workMutationObserver.observe(worksBoard, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+  });
 }
 
 function getPaletteKeys(card) {
@@ -1430,6 +1671,19 @@ function getPaletteKeys(card) {
   } catch {
     return [];
   }
+}
+
+function getPaletteThumbKeys(card) {
+  try {
+    const keys = JSON.parse(card?.dataset.paletteThumbKeys || "[]");
+    return Array.isArray(keys) ? keys : [];
+  } catch {
+    return [];
+  }
+}
+
+function setPaletteThumbKeys(card, keys) {
+  card.dataset.paletteThumbKeys = JSON.stringify(keys);
 }
 
 function getPaletteFiles(card) {
@@ -1473,19 +1727,92 @@ function setPaletteFiles(card, files) {
   card.dataset.paletteFiles = JSON.stringify(files.filter(Boolean));
 }
 
+const pendingWorkPreviewSources = new WeakMap();
+const workPreviewObserver = typeof IntersectionObserver === "function"
+  ? new IntersectionObserver((entries, observer) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const image = entry.target;
+        const pending = pendingWorkPreviewSources.get(image);
+        pendingWorkPreviewSources.delete(image);
+        observer.unobserve(image);
+        Promise.resolve(typeof pending === "function" ? pending() : pending)
+          .then((source) => {
+            if (source && image.getAttribute("src") !== source) image.src = source;
+          })
+          .catch(() => image.closest("[data-image-shell]")?.classList.add("image-load-error"));
+      });
+    }, { rootMargin: "360px 0px" })
+  : null;
+
+function queueWorkPreviewImage(image, sourceOrResolver) {
+  if (!image || !sourceOrResolver) return;
+  if (typeof sourceOrResolver === "string" && image.getAttribute("src") === sourceOrResolver) return;
+  image.removeAttribute("src");
+  pendingWorkPreviewSources.set(image, sourceOrResolver);
+  if (workPreviewObserver) workPreviewObserver.observe(image);
+  else Promise.resolve(typeof sourceOrResolver === "function" ? sourceOrResolver() : sourceOrResolver)
+    .then((source) => { if (source) image.src = source; });
+}
+
 function applyImageData(card, imageData, { syncReview = true } = {}) {
   if (!imageData) return;
   card.dataset.imageData = imageData;
   const trigger = card.querySelector(".preview-trigger");
   if (trigger) {
     trigger.classList.add("has-image");
-    trigger.style.backgroundImage = `url("${imageData}")`;
-    trigger.style.backgroundSize = "contain";
-    trigger.style.backgroundPosition = "center";
+    trigger.classList.remove("pattern", "pattern-a", "pattern-b", "pattern-c", "pattern-d");
+    trigger.style.backgroundImage = "";
     trigger.style.aspectRatio = "1 / 1";
     trigger.style.minHeight = "0";
+    let image = trigger.querySelector("img[data-work-preview]");
+    if (!image) {
+      image = document.createElement("img");
+      image.dataset.workPreview = "true";
+      image.alt = "";
+      image.loading = "lazy";
+      image.decoding = "async";
+      image.fetchPriority = "low";
+      trigger.prepend(image);
+    }
+    queueWorkPreviewImage(image, imageData);
   }
   if (syncReview) syncReviewCardPreviews();
+}
+
+function prepareWorkCardPreview(card) {
+  if (!card?.dataset.imageKey || card.dataset.imageData) return;
+  const trigger = card.querySelector(".preview-trigger");
+  if (!trigger) return;
+  trigger.dataset.imageShell = "true";
+  trigger.classList.add("has-image");
+  trigger.classList.remove("pattern", "pattern-a", "pattern-b", "pattern-c", "pattern-d");
+  trigger.style.backgroundImage = "";
+  trigger.style.aspectRatio = "1 / 1";
+  trigger.style.minHeight = "0";
+  let image = trigger.querySelector("img[data-work-preview]");
+  if (!image) {
+    image = document.createElement("img");
+    image.dataset.workPreview = "true";
+    image.alt = "";
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.fetchPriority = "low";
+    trigger.prepend(image);
+  }
+  queueWorkPreviewImage(image, async () => {
+    const source = await resolveImageSource(card.dataset.imageKey);
+    if (source) card.dataset.imageData = source;
+    return source;
+  });
+}
+
+function hydrateLazyKeyImages(root = document) {
+  root.querySelectorAll("img[data-image-key]:not([data-image-queued])").forEach((image) => {
+    image.dataset.imageQueued = "true";
+    image.closest("[data-image-shell]")?.setAttribute("data-image-shell", "true");
+    queueWorkPreviewImage(image, () => resolveImageSource(image.dataset.imageKey));
+  });
 }
 
 function setImageKey(card, key) {
@@ -1553,6 +1880,7 @@ function createWorkCard(data, { deferImageSync = false } = {}) {
   if (data.caseSeed) card.dataset.caseSeed = "true";
   card.dataset.colors = data.colors || 1;
   if (data.paletteKeys) card.dataset.paletteKeys = data.paletteKeys;
+  if (data.paletteThumbKeys) card.dataset.paletteThumbKeys = data.paletteThumbKeys;
   if (data.paletteFiles) card.dataset.paletteFiles = data.paletteFiles;
   if (data.referenceKeys) card.dataset.referenceKeys = data.referenceKeys;
   if (data.sourceFileName) card.dataset.sourceFileName = data.sourceFileName;
@@ -1585,7 +1913,7 @@ function createWorkCard(data, { deferImageSync = false } = {}) {
     : `<span class="sale-badge ${statusBadgeClass(saleText)}">销售状态：${escapeHtml(saleText)}</span><span class="sale-badge ${statusBadgeClass(customerText)}">客户状态：${escapeHtml(customerText)}</span>`;
 
   card.innerHTML = `
-    <button class="preview-trigger pattern pattern-a" type="button" aria-label="放大查看 ${escapeHtml(data.file)}"></button>
+    <button class="preview-trigger" type="button" aria-label="放大查看 ${escapeHtml(data.file)}"></button>
     <div class="work-body">
       <strong class="file-name">${escapeHtml(data.file)}</strong>
       <div class="work-head">
@@ -1618,6 +1946,17 @@ function createWorkCard(data, { deferImageSync = false } = {}) {
 
 function applyStoredState() {
   loadStudioState();
+  // 兼容历史订单/稿件保存的旧 JPG 衍生图地址；压缩后统一迁移到同名 WebP。
+  const storedImageReferencesBefore = JSON.stringify({
+    createdWorks: studioState.createdWorks || [],
+    overrides: studioState.overrides || {},
+  });
+  (studioState.createdWorks || []).forEach(normalizeStoredWorkImageReferences);
+  Object.values(studioState.overrides || {}).forEach(normalizeStoredWorkImageReferences);
+  const migratedLegacyImageReferences = storedImageReferencesBefore !== JSON.stringify({
+    createdWorks: studioState.createdWorks || [],
+    overrides: studioState.overrides || {},
+  });
   // 种子版本升级：清掉旧的案例种子（含旧字段），让它们按新逻辑重新生成。
   if (localStorage.getItem(SEED_VERSION_KEY) !== SEED_VERSION) {
     studioState.createdWorks = (studioState.createdWorks || []).filter(
@@ -1632,6 +1971,16 @@ function applyStoredState() {
   }
   syncProjectMemberOptions();
   studioOrders = studioState.orders?.length ? studioState.orders : [...defaultOrders];
+  if (localStorage.getItem(LEGACY_AUTO_PRICE_MIGRATION_KEY) !== "done") {
+    studioOrders.forEach((order) => {
+      const oldAutomaticPrice = orderPatternList(order).length * 100;
+      if (!order.priceManuallySet && Number(order.price) === oldAutomaticPrice) order.price = null;
+    });
+    try {
+      localStorage.setItem(LEGACY_AUTO_PRICE_MIGRATION_KEY, "done");
+    } catch {}
+    saveStudioState();
+  }
   (studioState.createdWorks || []).forEach((work) => createWorkCard({ ...work, generated: true }));
   refreshWorkCards();
 
@@ -1653,6 +2002,7 @@ function applyStoredState() {
     if (patch.imageKey) setImageKey(card, patch.imageKey);
     if (patch.paletteKeys) card.dataset.paletteKeys = patch.paletteKeys;
     if (patch.paletteFiles) card.dataset.paletteFiles = patch.paletteFiles;
+    if (patch.paletteThumbKeys) card.dataset.paletteThumbKeys = patch.paletteThumbKeys;
     if (patch.referenceKeys) card.dataset.referenceKeys = patch.referenceKeys;
     if (patch.sourceFileName) card.dataset.sourceFileName = patch.sourceFileName;
     if (patch.sourceFileKey) card.dataset.sourceFileKey = patch.sourceFileKey;
@@ -1679,26 +2029,13 @@ function applyStoredState() {
     .map((card) => ({ card, deletedAt: card.dataset.deletedAt || new Date().toISOString() }));
   purgeExpiredRecycleBin();
   renderCustomProjects();
+  if (migratedLegacyImageReferences) saveStudioState();
 }
 
 async function hydrateStoredImages() {
   const cards = [...workCards].filter((card) => card.dataset.imageKey && !card.dataset.imageData);
-  let cursor = 0;
-  const workerCount = Math.min(6, cards.length);
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (cursor < cards.length) {
-      const card = cards[cursor++];
-      try {
-        const imageData = await resolveImageSource(card.dataset.imageKey);
-        if (imageData) applyImageData(card, imageData, { syncReview: false });
-      } catch (error) {
-        console.warn("Image restore failed", card.dataset.file, error);
-      }
-    }
-  });
-  await Promise.all(workers);
-  syncReviewCardPreviews();
-  if (librarySessionActive) renderLibraryGrid();
+  cards.forEach(prepareWorkCardPreview);
+  return Promise.resolve();
 }
 
 const workMeta = {
@@ -1806,12 +2143,10 @@ function renderAdminDashboard() {
   const pendingCards = cards.filter((card) => isReviewPending(card) && reviewDisplayDate(card) === today);
   const pendingDesigns = pendingCards.filter((card) => card.dataset.workRole === "设计师").length;
   const pendingPainter = pendingCards.filter((card) => card.dataset.workRole === "手绘师").length;
-  const projects = activeProjectItems();
-  const reviewProjects = projects.filter((project) => normalizeProjectBoardStatus(project.status) === "稿件评审").length;
   const orders = relatedOrderItems();
   const deliveryOrders = orders.filter((order) => ["已确认下单", "进行中", "待评审"].includes(orderProgressStatus(order))).length;
-  const { projects: riskProjects, orders: riskOrders } = adminRiskData();
-  const riskTotal = riskProjects.length + riskOrders.length;
+  const { orders: riskOrders } = adminRiskData();
+  const riskTotal = riskOrders.length;
   const teamLoadStats = teamMembers.map((member) => ({ member, stats: teamMemberStats(member) }));
   const lightLoadMembers = teamLoadStats.filter(({ stats }) => teamLoadClass(stats.loadScore) === "low");
   const mediumLoadMembers = teamLoadStats.filter(({ stats }) => teamLoadClass(stats.loadScore) === "medium");
@@ -1824,15 +2159,13 @@ function renderAdminDashboard() {
     metricGrid.classList.add("admin-metric-grid");
     metricGrid.innerHTML = `
       <button class="metric-card" type="button" data-dashboard-jump="review" data-review-date="${today}" aria-label="查看今天待评审稿件"><span>待评审稿件</span><strong>${pendingCards.length}</strong><p>今天 · 设计稿 ${pendingDesigns} / 手绘素材 ${pendingPainter}</p></button>
-      <button class="metric-card" type="button" data-dashboard-jump="projects" aria-label="查看进行中项目"><span>进行中项目</span><strong>${projects.length}</strong><p>${reviewProjects} 个项目处于稿件评审</p></button>
       <button class="metric-card" type="button" data-dashboard-jump="orders" aria-label="查看待处理订单"><span>订单待处理</span><strong>${deliveryOrders}</strong><p>客户确认后进入订单中心</p></button>
-      <button class="metric-card ${riskTotal ? "alert" : "safe"}" type="button" data-open-risk aria-label="查看风险提醒"><span>风险提醒</span><strong>${riskTotal}</strong><p class="risk-summary"><span>临近截止 ${riskProjects.length}</span><span>待评审 ${riskOrders.length}</span></p></button>
+      <button class="metric-card ${riskTotal ? "alert" : "safe"}" type="button" data-open-risk aria-label="查看风险提醒"><span>风险提醒</span><strong>${riskTotal}</strong><p class="risk-summary"><span>待评审订单 ${riskOrders.length}</span></p></button>
     `;
   }
   if (commandGrid) {
     const demoPendingCards = pendingCards.length;
-    const demoProjects = projects.length || 2;
-    const demoDeliveryOrders = deliveryOrders || 1;
+    const demoDeliveryOrders = deliveryOrders;
     commandGrid.innerHTML = `
       <section class="panel wide">
         <div class="panel-head">
@@ -1840,15 +2173,11 @@ function renderAdminDashboard() {
         </div>
         <div class="project-list project-command-list">
           <article data-dashboard-jump="review" data-review-date="${today}" role="button" tabindex="0">
-            <div><strong>稿件审核</strong><span>今天 ${demoPendingCards} 张待处理，通过后才进入客户稿库。</span></div>
+            <div><strong>稿件审核</strong><span>今天 <b class="command-count ${demoPendingCards > 0 ? "has-value" : ""}">${demoPendingCards}</b> 张待处理，通过后才进入客户稿库。</span></div>
             <i class="command-status-dot attention" aria-label="警告"></i>
           </article>
-          <article data-dashboard-jump="projects" role="button" tabindex="0">
-            <div><strong>项目推进</strong><span>${demoProjects} 个内部项目执行中，进度正常。</span></div>
-            <i class="command-status-dot safe" aria-label="正常"></i>
-          </article>
           <article data-dashboard-jump="orders" role="button" tabindex="0">
-            <div><strong>订单交付</strong><span>${demoDeliveryOrders} 个客户订单临近截止，请及时处理。</span></div>
+            <div><strong>订单交付</strong><span><b class="command-count ${demoDeliveryOrders > 0 ? "has-value" : ""}">${demoDeliveryOrders}</b> 个客户订单临近截止，请及时处理。</span></div>
             <i class="command-status-dot attention" aria-label="警告"></i>
           </article>
           <article data-dashboard-jump="team" role="button" tabindex="0">
@@ -1891,7 +2220,6 @@ function renderCreativeDashboard(role) {
   const sleeping = cards.filter(isSleepingWork).length;
   const sold = cards.filter((card) => cardStatusSummary(card).includes("已出售") || cardStatusSummary(card).includes("出售")).length;
   const projects = activeProjectItems();
-  const orders = relatedOrderItems().filter((order) => orderProgressStatus(order) !== "已完成" && orderProgressStatus(order) !== "已关闭");
   if (metricGrid) {
     metricGrid.innerHTML = `
       <article class="metric-card"><span>我的稿件</span><strong>${cards.length}</strong><p>${pending} 张等待审核或复核</p></article>
@@ -1903,10 +2231,21 @@ function renderCreativeDashboard(role) {
   if (taskList) {
     taskList.innerHTML = `
       <p><b>我的项目</b><span>${projects.slice(0, 2).map((project) => project.name).join("、") || "暂无进行中项目"}</span></p>
-      <p><b>我的订单</b><span>${orders.slice(0, 2).map((order) => order.id).join("、") || "暂无关联订单"}</span></p>
       <p><b>稿件处理</b><span>${pending} 张待审核，${revision} 张需修改</span></p>
+      <p><b>休眠稿件</b><span>${sleeping} 张暂存，可继续完善后提交</span></p>
     `;
   }
+}
+
+function salesDashboardIcon(type) {
+  const icons = {
+    library: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m6.5 17 4-4 3 2.5 2.5-2 2 2.5"/></svg>',
+    cart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h2l2 10h9l2-7H7"/><circle cx="10" cy="19" r="1.5"/><circle cx="17" cy="19" r="1.5"/></svg>',
+    order: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>',
+    done: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.6 2.6L16.5 9"/></svg>',
+    customer: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="9" r="3"/><path d="M3.5 20v-2a5.5 5.5 0 0 1 11 0v2M15 8.5a3 3 0 0 1 0 5.5M16 15a4.5 4.5 0 0 1 4.5 4.5"/></svg>',
+  };
+  return icons[type] || icons.order;
 }
 
 function renderSalesDashboard() {
@@ -1918,33 +2257,20 @@ function renderSalesDashboard() {
   const activeOrders = orders.filter((order) => ["已确认下单", "进行中", "待评审"].includes(orderProgressStatus(order)));
   const completed = orders.filter((order) => orderProgressStatus(order) === "已完成").length;
   if (metricGrid) {
+    metricGrid.classList.add("sales-metric-grid");
     metricGrid.innerHTML = `
-      <article class="metric-card"><span>可选稿件</span><strong>${libraryEligibleDesigns().length}</strong><p>已通过且未占用订单</p></article>
-      <article class="metric-card"><span>选稿车</span><strong>${libraryCart.size}</strong><p>等待客户确认</p></article>
-      <article class="metric-card alert"><span>待跟进订单</span><strong>${activeOrders.length}</strong><p>确认后进入交付链路</p></article>
-      <article class="metric-card"><span>已完成</span><strong>${completed}</strong><p>客户交付完成订单</p></article>
+      <article class="metric-card sales-metric-card"><i>${salesDashboardIcon("library")}</i><div><span>可选稿件</span><strong>${libraryEligibleDesigns().length}</strong><p>已通过且未占用订单</p></div></article>
+      <article class="metric-card sales-metric-card"><i>${salesDashboardIcon("cart")}</i><div><span>选稿车</span><strong>${libraryCart.size}</strong><p>等待客户确认</p></div></article>
+      <article class="metric-card sales-metric-card alert"><i>${salesDashboardIcon("order")}</i><div><span>待跟进订单</span><strong>${activeOrders.length}</strong><p>确认后进入交付链路</p></div></article>
+      <article class="metric-card sales-metric-card"><i>${salesDashboardIcon("done")}</i><div><span>已完成</span><strong>${completed}</strong><p>客户交付完成订单</p></div></article>
     `;
   }
   if (taskList) {
+    taskList.classList.add("sales-task-list");
     taskList.innerHTML = `
-      <p><b>客户稿库</b><span>${libraryEligibleDesigns().length} 组可推荐稿件</span></p>
-      <p><b>选稿车</b><span>${libraryCart.size} 组等待确认下单</span></p>
-      <p><b>订单中心</b><span>${activeOrders.length} 单需要跟进交付</span></p>
-    `;
-  }
-}
-
-function renderSamplerDashboard() {
-  const dashboard = document.querySelector('[data-role-dashboard="打样师"]');
-  if (!dashboard) return;
-  const metricGrid = dashboard.querySelector(".metric-grid");
-  const projects = activeProjectItems();
-  if (metricGrid) {
-    metricGrid.innerHTML = `
-      <article class="metric-card"><span>关联项目</span><strong>${projects.length}</strong><p>需要关注定稿和打样节点</p></article>
-      <article class="metric-card"><span>内部定稿</span><strong>${visibleProjectItems().filter((project) => normalizeProjectBoardStatus(project.status) === "内部定稿").length}</strong><p>可准备进入打样</p></article>
-      <article class="metric-card alert"><span>待确认</span><strong>${projects.filter((project) => normalizeProjectBoardStatus(project.status) === "稿件评审").length}</strong><p>等待设计稿定版</p></article>
-      <article class="metric-card"><span>订单参考</span><strong>${relatedOrderItems().length}</strong><p>客户订单由订单中心跟进</p></article>
+      <p><i>${salesDashboardIcon("customer")}</i><b>客户中心</b><span>${customerCenterClients.length || buildCustomerCenter().length} 位客户可跟进</span></p>
+      <p><i>${salesDashboardIcon("cart")}</i><b>选稿车</b><span>${libraryCart.size} 组等待确认下单</span></p>
+      <p><i>${salesDashboardIcon("order")}</i><b>订单中心</b><span>${activeOrders.length} 单需要跟进交付</span></p>
     `;
   }
 }
@@ -2203,7 +2529,6 @@ function renderDashboardOverview(role = roleSelect.value) {
   if (role === "管理员") renderAdminDashboard();
   if (role === "设计师" || role === "手绘师") renderCreativeDashboard(role);
   if (role === "销售") renderSalesDashboard();
-  if (role === "打样师") renderSamplerDashboard();
 }
 
 function updateRoleDashboard(role) {
@@ -2242,6 +2567,7 @@ function switchView(target) {
       selectionFlow?.classList.add("hidden");
       renderCustomerCenter();
     }
+    libraryGridRenderLimit = LIBRARY_GRID_BATCH;
     renderLibraryGrid();
   }
   if (target === "cart") {
@@ -2249,7 +2575,7 @@ function switchView(target) {
     renderCartPage();
   }
   if (target === "myLibrary") {
-    renderMyPatternLibrary();
+    renderMyPatternLibrary(true);
   }
   if (target === "orders") {
     renderOrderCenter();
@@ -2260,17 +2586,14 @@ function switchView(target) {
   if (target === "team") {
     renderTeamView();
   }
+  if (target === "resources") {
+    renderResourceLibrary();
+  }
   if (target === "dashboard") {
     renderDashboardOverview(roleSelect.value);
     pageTitle.textContent = roleDashboardTitles[roleSelect.value];
   } else if (target === "designer") {
     pageTitle.textContent = roleSelect.value === "管理员" ? "作品库" : roleSelect.value === "手绘师" ? "我的手绘稿" : "我的设计稿";
-  } else if (target === "projects" && roleSelect.value !== "管理员") {
-    pageTitle.textContent = "我的项目";
-  } else if (target === "orders" && (roleSelect.value === "设计师" || roleSelect.value === "手绘师")) {
-    pageTitle.textContent = "我的订单";
-  } else if (target === "sampling" && roleSelect.value === "打样师") {
-    pageTitle.textContent = "我的打样";
   } else {
     pageTitle.textContent = titleMap[target];
   }
@@ -2290,14 +2613,11 @@ function configureRoleNavigation(role) {
   });
 
   const designerNav = document.querySelector('[data-view="designer"]');
-  const projectNav = document.querySelector('[data-view="projects"]');
   const ordersNav = document.querySelector('[data-view="orders"]');
-  const samplingNav = document.querySelector('[data-view="sampling"]');
-
-  designerNav.querySelector(".nav-label").textContent = role === "管理员" ? "作品库" : role === "手绘师" ? "我的手绘稿" : "我的设计稿";
-  projectNav.querySelector(".nav-label").textContent = role === "管理员" ? "项目进度" : "我的项目";
-  ordersNav.querySelector(".nav-label").textContent = role === "设计师" || role === "手绘师" ? "我的订单" : "订单中心";
-  if (samplingNav) samplingNav.querySelector(".nav-label").textContent = role === "打样师" ? "我的打样" : "打样管理";
+  const designerLabel = designerNav?.querySelector(".nav-label");
+  const ordersLabel = ordersNav?.querySelector(".nav-label");
+  if (designerLabel) designerLabel.textContent = role === "管理员" ? "作品库" : role === "手绘师" ? "我的手绘稿" : "我的设计稿";
+  if (ordersLabel) ordersLabel.textContent = "订单中心";
   navItems.forEach((item) => {
     const label = item.querySelector(".nav-label")?.textContent || "";
     item.dataset.tooltip = label;
@@ -2318,6 +2638,7 @@ function configureRoleNavigation(role) {
 function configureWorksView(role, ownerKey) {
   const isAdmin = role === "管理员";
   const isPainter = role === "手绘师";
+  const isCreativeRole = role === "设计师" || isPainter;
   const activeWorkRole = isPainter ? "手绘师" : "设计师";
 
   worksTitle.textContent = isAdmin ? "作品库" : isPainter ? "我的手绘稿" : "我的设计稿";
@@ -2331,14 +2652,47 @@ function configureWorksView(role, ownerKey) {
   worksUploadRow?.classList.toggle("hidden", isAdmin);
   // 管理员作品库使用图片画廊布局（方形瓷砖、hover 显示信息）。
   worksBoard?.classList.toggle("library-gallery", isAdmin);
+  // 设计师与手绘师沿用每日评审的方形卡片语言，并显示自己的评审结果。
+  worksBoard?.classList.toggle("personal-review-gallery", isCreativeRole);
 
   workCards.forEach((card) => {
     const belongsToRole = card.dataset.workRole === activeWorkRole;
     const belongsToAccount = card.dataset.workOwner === ownerKey;
     card.classList.toggle("hidden", !isAdmin && (!belongsToRole || !belongsToAccount));
+    syncPersonalReviewStatus(card);
   });
   applyLibraryFilters();
   sortWorkCards();
+}
+
+function personalReviewStatus(card) {
+  if (isReviewPending(card)) return { label: "待评审", tone: "pending" };
+  const action = reviewLogs(card)[0]?.action || card.dataset.reviewAction || "";
+  const summary = cardStatusSummary(card);
+  if (action === "修改" || summary.includes("需修改") || summary.includes("未修改")) {
+    return { label: "需修改", tone: "revision" };
+  }
+  if (action === "Pass" || summary.includes("Pass") || isSleepingWork(card)) {
+    return { label: "Pass", tone: "pass" };
+  }
+  if (action === "通过" || summary.includes("已通过")) {
+    return { label: "已通过", tone: "approved" };
+  }
+  return { label: "已评审", tone: "reviewed" };
+}
+
+function syncPersonalReviewStatus(card) {
+  const trigger = card?.querySelector(".preview-trigger");
+  if (!trigger) return;
+  let badge = trigger.querySelector(".personal-review-status");
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "personal-review-status";
+    trigger.appendChild(badge);
+  }
+  const status = personalReviewStatus(card);
+  badge.className = `personal-review-status ${status.tone}`;
+  badge.textContent = status.label;
 }
 
 function visibleWorkCards() {
@@ -2350,6 +2704,50 @@ function visibleWorkCards() {
       !card.classList.contains("filtered-hidden") &&
       (inSleepView ? isSleepingWork(card) && cardBelongsToCurrentAccount(card) : !card.classList.contains("hidden") && !isSleepingWork(card))
   );
+}
+
+const WORK_RENDER_BATCH = 36;
+let workRenderLimit = WORK_RENDER_BATCH;
+const galleryAutoLoadObserver = typeof IntersectionObserver === "function"
+  ? new IntersectionObserver((entries, observer) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        observer.unobserve(entry.target);
+        requestAnimationFrame(() => {
+          if (entry.target.isConnected) entry.target.click();
+        });
+      });
+    }, { rootMargin: "480px 0px" })
+  : null;
+
+function observeGalleryAutoLoad(root) {
+  if (!root) return;
+  root.querySelectorAll("[data-gallery-auto-load]:not([data-auto-load-observed])").forEach((sentinel) => {
+    sentinel.dataset.autoLoadObserved = "true";
+    if (galleryAutoLoadObserver) galleryAutoLoadObserver.observe(sentinel);
+  });
+}
+
+function applyWorkGalleryBatch(reset = false) {
+  if (!worksBoard) return;
+  if (reset) workRenderLimit = WORK_RENDER_BATCH;
+  worksBoard.querySelector("[data-work-load-more]")?.remove();
+  const cards = visibleWorkCards();
+  cards.forEach((card, index) => {
+    const visible = index < workRenderLimit;
+    card.classList.toggle("gallery-batch-hidden", !visible);
+    if (visible) prepareWorkCardPreview(card);
+  });
+  [...workCards]
+    .filter((card) => !cards.includes(card))
+    .forEach((card) => card.classList.remove("gallery-batch-hidden"));
+  if (cards.length > workRenderLimit) {
+    worksBoard.insertAdjacentHTML(
+      "beforeend",
+      `<button class="gallery-auto-load-sentinel" type="button" data-gallery-auto-load data-work-load-more tabindex="-1" aria-hidden="true"></button>`
+    );
+  }
+  observeGalleryAutoLoad(worksBoard);
 }
 
 // 当前每日评审展示的稿件集合（当天 + 当前类型/状态筛选），用于预览翻页限定范围。
@@ -2381,7 +2779,11 @@ function anyOverlayOpen() {
     projectDetailModal?.classList.contains("active") ||
     projectFileViewer?.classList.contains("active") ||
     projectFileManager?.classList.contains("active") ||
-    painterPickerModal.classList.contains("active")
+    painterPickerModal.classList.contains("active") ||
+    document.getElementById("orderDetailOverlay")?.classList.contains("open") ||
+    document.getElementById("payOverlay")?.classList.contains("open") ||
+    document.getElementById("custPatternViewer")?.classList.contains("open") ||
+    document.querySelector("#deliveryAgreementModal")?.classList.contains("active")
   );
 }
 
@@ -2465,6 +2867,27 @@ function workOwnerName(card) {
   return teamMembers.find((member) => member.ownerKey === card.dataset.workOwner)?.name || ownerNames[card.dataset.workOwner] || card.dataset.workOwner || "-";
 }
 
+function painterWorkCatalog() {
+  return [...workCards]
+    .filter((card) => card.dataset.workRole === "手绘师" && !card.classList.contains("deleted"))
+    .map((card) => {
+      const trigger = card.querySelector(".preview-trigger");
+      const pattern = [...(trigger?.classList || [])].find((className) => /^pattern-/.test(className)) || "";
+      return {
+        file: card.dataset.file,
+        painter: workOwnerName(card),
+        title: card.querySelector(".work-head > strong")?.textContent.trim() || card.dataset.file,
+        project: card.querySelector(".work-body > p")?.textContent.replace(/^项目：/, "").trim() || "未关联项目",
+        tags: String(card.dataset.tags || "").split(",").filter(Boolean),
+        pattern,
+        imageData: card.dataset.imageData || trigger?.querySelector("img[data-work-preview]")?.src || "",
+        imageKey: card.dataset.imageKey || "",
+        reviewStatus: workDisplayStatus(card),
+      };
+    })
+    .sort((a, b) => a.file.localeCompare(b.file, "zh-CN"));
+}
+
 function workOwnerKeyByName(name) {
   const ownerKeys = {
     许然: "designer",
@@ -2545,6 +2968,26 @@ function workProjectName(card) {
 function buildGlobalSearchMatches(query) {
   const key = normalizeSearch(query);
   if (!key) return [];
+  if (currentAccount.role === "客户") {
+    const company = currentAccount.company || currentAccount.name || "";
+    const delivered = new Set(customerDeliveredFiles(company));
+    const locked = customerLockedFiles(company);
+    return [...new Set([...delivered, ...locked.keys()])].map((file) => {
+      const card = sourceCardByFile(file);
+      const name = card?.querySelector(".work-head strong")?.textContent.trim() || file;
+      return {
+        type: "client-work",
+        title: name,
+        meta: locked.has(file) ? `${file} · 已购买，等待交付` : `${file} · 我的花型库`,
+        file,
+        locked: locked.has(file),
+      };
+    }).filter((item) => searchMatches(key, [
+      item.title,
+      item.file,
+      cardTagsText(sourceCardByFile(item.file)),
+    ])).slice(0, 12);
+  }
   const matches = [];
   [...workCards].forEach((card) => {
     if (card.classList.contains("deleted")) return;
@@ -2663,6 +3106,15 @@ function openGlobalSearchResult(index) {
   if (!item) return;
   hideGlobalSearchResults();
   if (globalSearchInput) globalSearchInput.value = "";
+  if (item.type === "client-work") {
+    switchView("myLibrary");
+    if (item.locked) {
+      showToast("这款花型已购买，等待交付后解锁预览。", "warning");
+    } else {
+      openCustomerPatternViewer(item.file);
+    }
+    return;
+  }
   if (item.type === "work") {
     switchView("designer");
     openLightbox(item.card);
@@ -2955,16 +3407,21 @@ function viewerLibraryModeActive() {
 }
 
 function libraryCardHtml(card, viewerMode = viewerLibraryModeActive()) {
-  const trigger = card.querySelector(".preview-trigger");
   const colorCount = Number(card.dataset.colors || 1);
-  const patternClass = trigger?.className.replace("preview-trigger", "").trim() || "pattern pattern-a";
-  const imageStyle = card.dataset.imageData ? ` style="background-image:url('${card.dataset.imageData}')"` : "";
+  const previewSource = cardPreviewSource(card);
+  const imageKey = card.dataset.imageKey || "";
+  const patternClass = previewSource || imageKey ? "has-image" : "";
+  const imageMarkup = previewSource
+    ? `<img src="${escapeHtml(previewSource)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`
+    : imageKey
+      ? `<img data-image-key="${escapeHtml(imageKey)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`
+      : "";
   const project = card.querySelector(".work-body > p")?.textContent.replace(/^项目：/, "").trim() || "未关联项目";
   const title = card.querySelector(".work-head strong")?.textContent.trim() || card.dataset.file;
   if (viewerMode) {
     const selected = libraryCart.has(card.dataset.file);
     return `<article class="library-card viewer-library-card" data-library-file="${escapeHtml(card.dataset.file)}">
-      <button class="preview-trigger ${patternClass}" type="button"${imageStyle} aria-label="查看 ${escapeHtml(title)}"></button>
+      <button class="preview-trigger ${patternClass}" data-image-shell type="button" aria-label="查看 ${escapeHtml(title)}">${imageMarkup}</button>
       <div class="library-card-info viewer-library-card-info">
         <strong>${escapeHtml(title)}</strong>
         <span>配色 ${colorCount}</span>
@@ -2975,7 +3432,7 @@ function libraryCardHtml(card, viewerMode = viewerLibraryModeActive()) {
   const checked = libraryCompareSelection.has(card.dataset.file) ? " checked" : "";
   return `<article class="library-card" data-library-file="${card.dataset.file}">
     <label class="library-compare"><input type="checkbox" data-library-compare="${card.dataset.file}"${checked}>比对</label>
-    <button class="preview-trigger ${patternClass}" type="button"${imageStyle}>${colorCount > 1 ? `<span class="color-count">${colorCount}</span>` : ""}</button>
+    <button class="preview-trigger ${patternClass}" data-image-shell type="button">${imageMarkup}${colorCount > 1 ? `<span class="color-count">${colorCount}</span>` : ""}</button>
     <div class="library-card-info">
       <strong>${card.dataset.file}</strong>
       <span>${escapeHtml(project)}</span>
@@ -3162,8 +3619,7 @@ function activeCustomerClient() {
 }
 
 function filteredCustomerClients() {
-  if (customerCenterFilter === "all") return customerCenterClients;
-  return customerCenterClients.filter((c) => c.status === customerCenterFilter);
+  return customerCenterClients;
 }
 
 function approvedLibraryCards() {
@@ -3211,14 +3667,7 @@ function renderCustomerList() {
   const listBody = document.querySelector("#customerListBody");
   const countEl = document.querySelector("#customerListCount");
   const pager = document.querySelector("#customerListPager");
-  const filterBar = document.querySelector("#customerListFilter");
   if (!listBody) return;
-  if (filterBar) {
-    const filters = [["all", "全部"], ["合作中", "合作中"], ["暂停合作", "暂停合作"], ["潜在客户", "潜在客户"]];
-    filterBar.innerHTML = filters.map(([key, label]) =>
-      `<button type="button" class="cc-filter-pill ${key === customerCenterFilter ? "active" : ""}" data-cc-filter="${key}">${label}</button>`
-    ).join("");
-  }
   const list = filteredCustomerClients();
   const total = list.length;
   if (countEl) countEl.textContent = `客户列表（${total}）`;
@@ -3227,22 +3676,15 @@ function renderCustomerList() {
   const startIndex = (customerCenterPage - 1) * CUSTOMER_PAGE_SIZE;
   const pageItems = list.slice(startIndex, startIndex + CUSTOMER_PAGE_SIZE);
   listBody.innerHTML = pageItems.length ? pageItems.map((client) => {
-    const statusButtons = CUSTOMER_STATUS_OPTIONS.map((s) =>
-      `<button type="button" data-cc-set-status="${s}" data-cc-status-id="${escapeHtml(client.id)}" class="${s === client.status ? "current" : ""}">${s}</button>`
-    ).join("");
     return `
     <div class="cc-row ${client.id === activeCustomerCenterId ? "active" : ""}" data-customer-id="${escapeHtml(client.id)}" role="button" tabindex="0">
       <span class="cc-cell cc-cell-name">${escapeHtml(client.name)}</span>
       <span class="cc-cell cc-cell-contact">${escapeHtml(client.contact)}</span>
       <span class="cc-cell cc-cell-count">${customerRealPurchased(client)} 款</span>
       <span class="cc-cell cc-cell-date">${escapeHtml(customerRealLastBuy(client))}</span>
-      <span class="cc-cell cc-cell-status"><em class="${customerStatusClass(client.status)}">${escapeHtml(client.status)}</em></span>
       <span class="cc-row-action">
         <button class="cc-row-menu-btn" type="button" data-customer-menu="${escapeHtml(client.id)}" aria-label="更多操作">⋯</button>
         <div class="cc-row-menu ${openCustomerMenuId === client.id ? "" : "hidden"}">
-          <div class="cc-menu-label">更改合作状态</div>
-          ${statusButtons}
-          <div class="cc-menu-sep"></div>
           <button class="cc-menu-danger" type="button" data-customer-delete="${escapeHtml(client.id)}">删除客户</button>
         </div>
       </span>
@@ -3278,7 +3720,6 @@ function renderCustomerDetail() {
     <div class="cc-detail-head">
       <div>
         <h2 class="cc-editable" data-cc-edit="name" title="双击编辑">${escapeHtml(client.name)}</h2>
-        <div class="cc-detail-tags"><span class="cc-detail-tag ${customerTagClass(client.status)}">${escapeHtml(client.status)}</span></div>
       </div>
       <div class="cc-detail-actions">
         <button class="primary-button" type="button" data-customer-start-selection="${escapeHtml(client.id)}">开始选稿</button>
@@ -3303,10 +3744,10 @@ function renderCustomerTabBody(client) {
     return `<div class="cc-history">${list.map((o) => {
       const n = orderPatternList(o).length;
       const paid = o.paymentStatus === "已支付";
-      const amount = (o.price != null ? Number(o.price) : n * 100).toFixed(2);
+      const amount = orderPriceValue(o);
       return `<button class="cc-hist-row" type="button" data-cc-open-order="${escapeHtml(o.id)}">
         <span class="cc-hist-main"><strong>${escapeHtml(o.id)}</strong><small>${escapeHtml(o.createdAt || "—")} · ${n} 款花型</small></span>
-        <span class="cc-hist-right"><em>¥${amount}</em>
+        <span class="cc-hist-right"><em>${amount == null ? "待输入金额" : orderPriceText(o)}</em>
         <i class="cc-hist-tag ${paid ? "ok" : ""}">${paid ? "已支付" : "未支付"}</i>
         <i class="cc-hist-tag ${orderDeliverStatus(o) === "已交付" ? "ok" : ""}">${escapeHtml(orderDeliverStatus(o))}</i></span>
       </button>`;
@@ -3364,10 +3805,12 @@ function customerProfileCardHtml(client) {
       <div><span>最近合作</span><strong>${escapeHtml(customerLastCoop(client))}</strong></div>
       <div><span>已购花型</span><strong>${customerRealPurchased(client)} 款</strong></div>
       <div><span>最近看稿</span><strong>${escapeHtml(customerRealLastReview(client))}</strong></div>
-      <div><span>状态</span><strong>${escapeHtml(client.status)}</strong></div>
       <div><span>所在地区</span><strong>${escapeHtml(client.region)}</strong></div>
     </div></section></div>`;
 }
+
+const LIBRARY_GRID_BATCH = 24;
+let libraryGridRenderLimit = LIBRARY_GRID_BATCH;
 
 function renderLibraryGrid() {
   if (!libraryGrid) return;
@@ -3377,14 +3820,19 @@ function renderLibraryGrid() {
   }
   const viewerMode = viewerLibraryModeActive();
   const designs = viewerMode ? filteredViewerLibraryDesigns() : libraryEligibleDesigns();
+  const visibleDesigns = designs.slice(0, libraryGridRenderLimit);
   const schemeCards = [];
   libraryGrid.innerHTML = designs.length
-    ? [...designs.map((card) => libraryCardHtml(card, viewerMode)), ...schemeCards].join("")
+    ? `${[...visibleDesigns.map((card) => libraryCardHtml(card, viewerMode)), ...schemeCards].join("")}${visibleDesigns.length < designs.length
+      ? `<button class="gallery-auto-load-sentinel" type="button" data-gallery-auto-load data-library-load-more tabindex="-1" aria-hidden="true"></button>`
+      : ""}`
     : `<p class="empty-state">暂无可供客户选择的设计稿。审核通过后的设计稿会出现在这里。</p>`;
   libraryGrid.classList.toggle("viewer-customer-grid", viewerMode);
   libraryGrid.classList.toggle("cards-info-hidden", !viewerMode && libraryInfoHidden);
   libraryStatus.textContent = `${libraryCustomer.value} / 选稿人：${libraryViewer.value.trim()} / 可看 ${designs.length + schemeCards.length} 组稿件`;
   if (viewerLibraryResultCount) viewerLibraryResultCount.textContent = `共找到 ${designs.length} 个作品`;
+  hydrateLazyKeyImages(libraryGrid);
+  observeGalleryAutoLoad(libraryGrid);
 }
 
 // 用 Map 索引避免每次都展开整个 NodeList 做线性查找（订单/选稿车渲染会调用成百上千次）
@@ -3415,8 +3863,7 @@ function renderLibraryCart() {
   libraryCartList.innerHTML = files
     .map((file) => {
       const card = sourceCardByFile(file);
-      const trigger = card?.querySelector(".preview-trigger");
-      const patternClass = trigger?.className.replace("preview-trigger", "").trim() || "pattern pattern-a";
+      const patternClass = card?.dataset.imageData ? "has-image" : "";
       const imageStyle = card?.dataset.imageData ? ` style="background-image:url('${card.dataset.imageData}')"` : "";
       return `<article class="cart-item" data-cart-file="${file}">
         <button class="cart-thumb ${patternClass}" type="button"${imageStyle}></button>
@@ -3702,8 +4149,7 @@ function orderCardHtml(order) {
   const thumbnails = (order.files || [])
     .map((file) => {
       const card = sourceCardByFile(file);
-      const trigger = card?.querySelector(".preview-trigger");
-      const patternClass = trigger?.className.replace("preview-trigger", "").trim() || "pattern pattern-a";
+      const patternClass = card?.dataset.imageData ? "has-image" : "";
       const imageStyle = card?.dataset.imageData ? ` style="background-image:url('${card.dataset.imageData}')"` : "";
       const fileState = fileStates[file] || "未审核";
       const fileLink = order.fileLinks?.[file] ? `<em>${escapeHtml(order.fileLinks[file])}</em>` : "";
@@ -3767,8 +4213,6 @@ function renderCustomerGroups(orders) {
     .join("");
 }
 
-let orderExpandedId = null;
-
 function orderDeliverStatus(order) {
   return order.deliverStatus || (orderProgressStatus(order) === "已完成" ? "已交付" : "未交付");
 }
@@ -3780,6 +4224,14 @@ function orderAgreementStatus(order) {
 function orderPatternList(order) {
   if (order.patternIds?.length) return order.patternIds;
   return (order.files || []).map((f) => f?.name || f).filter(Boolean);
+}
+
+function orderPrimaryActionLabel(order) {
+  if (orderDeliverStatus(order) === "已交付") return "取消交付";
+  const agreement = orderAgreementStatus(order);
+  if (agreement === "未发起" || agreement === "审核驳回") return "上传协议";
+  if (agreement !== "已签署") return "签约";
+  return "交付";
 }
 
 function orderTableFiltered() {
@@ -3801,20 +4253,16 @@ function orderRowHtml(order, idx) {
   const name = patterns.length ? `${patterns[0]}${patterns.length > 1 ? ` 等 ${patterns.length} 款` : ""}` : `${order.customer || "客户"} 订单`;
   const priceVal = orderPriceValue(order);
   const priceCell = canEditOrderPrice()
-    ? `<button class="order-price-btn ${priceVal == null ? "todo" : ""}" type="button" data-order-price="${escapeHtml(order.id)}" title="点击修改价格">${priceVal == null ? "待输入" : `¥${priceVal.toFixed(2)}`}</button>`
-    : `<span class="${priceVal == null ? "order-price-todo" : ""}">${orderPriceText(order)}</span>`;
+    ? `<button class="order-price-btn ${priceVal == null ? "todo" : ""}" type="button" data-order-price="${escapeHtml(order.id)}" title="点击修改价格">${priceVal == null ? "待输入金额" : orderPriceText(order)}</button>`
+    : `<span class="${priceVal == null ? "order-price-todo" : ""}">${priceVal == null ? "待输入金额" : orderPriceText(order)}</span>`;
   const time = order.createdAt || order.time || "—";
   const user = order.viewer || order.customer || "—";
   const deliver = orderDeliverStatus(order);
   const agreement = orderAgreementStatus(order);
-  const expanded = orderExpandedId === order.id;
-  // 只有展开的那一行才生成缩略图（base64 内联很重，折叠时不渲染，避免生成订单/刷新列表卡顿）
-  const thumbs = expanded ? patterns.slice(0, 12).map((f) => {
-    const c = sourceCardByFile(f);
-    const img = c?.dataset.imageData ? `background-image:url('${c.dataset.imageData}')` : "";
-    return `<span class="order-flower" style="${img}" title="${escapeHtml(f)}"></span>`;
-  }).join("") : "";
-  return `<tr class="order-row" data-order-row="${escapeHtml(order.id)}">
+  const paid = order.paymentStatus === "已支付";
+  const primaryAction = orderPrimaryActionLabel(order);
+  const trashIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"></path></svg>';
+  return `<tr class="order-row" data-order-row="${escapeHtml(order.id)}" title="点击查看订单详情">
       <td class="order-cell-index">${idx + 1}</td>
       <td class="order-cell-number">${escapeHtml(order.id)}</td>
       <td class="order-cell-product">${escapeHtml(name)}</td>
@@ -3822,34 +4270,19 @@ function orderRowHtml(order, idx) {
       <td class="order-cell-time">${escapeHtml(time)}</td>
       <td class="order-cell-user">${escapeHtml(user)}</td>
       <td class="order-cell-status">
-        <span class="order-deliver ${deliver === "已交付" ? "done" : "pending"}">${deliver}</span>
-        ${agreement === "客户已回传" ? `<span class="order-flag act">待审核签署件</span>` : ""}
-        ${order.paymentStatus === "已支付" ? `<span class="order-flag paid">已支付</span>` : ""}
+        <span class="order-status-text ${paid ? "success" : "warning"}">${paid ? "已支付" : "未支付"}</span>
+        <span class="order-status-separator">·</span>
+        <span class="order-status-text ${deliver === "已交付" ? "success" : "warning"}">${deliver}</span>
       </td>
       <td class="order-cell-operation">
         <div class="order-actions">
           <div class="order-actions-main">
-            <button class="order-deliver-btn ${deliver === "已交付" ? "delivered" : ""} ${agreement === "待客户签署" && deliver !== "已交付" ? "awaiting-signature" : ""}" type="button" data-order-toggle-deliver="${escapeHtml(order.id)}" title="${deliver === "已交付" ? "取消本次交付" : agreement === "已签署" ? "交付已解锁作品" : "客户签署协议后方可交付"}">${deliver === "已交付" ? "取消交付" : agreement === "待客户签署" ? "待签署" : "交付"}</button>
-            <div class="order-menu-wrap">
-              <button class="order-menu-btn" type="button" data-order-menu="${escapeHtml(order.id)}" aria-label="更多操作" title="更多操作">⋯</button>
-              <div class="order-menu-pop hidden" data-order-menu-pop="${escapeHtml(order.id)}">
-                <button type="button" data-order-detail="${escapeHtml(order.id)}">查看详情</button>
-                ${agreement !== "已签署" ? `<button type="button" data-order-upload-agreement="${escapeHtml(order.id)}">上传协议</button>` : ""}
-                <button type="button" data-order-close="${escapeHtml(order.id)}">关闭订单</button>
-                ${deliver !== "已交付" ? `<button type="button" class="danger" data-order-delete="${escapeHtml(order.id)}">删除订单</button>` : ""}
-              </div>
-            </div>
+            <button class="order-deliver-btn ${deliver === "已交付" ? "delivered" : ""} ${agreement !== "已签署" && deliver !== "已交付" ? "awaiting-signature" : ""}" type="button" data-order-toggle-deliver="${escapeHtml(order.id)}" title="${escapeHtml(primaryAction)}">${escapeHtml(primaryAction)}</button>
+            <button class="order-delete-btn" type="button" data-order-delete="${escapeHtml(order.id)}" aria-label="删除订单 ${escapeHtml(order.id)}" title="删除订单">${trashIcon}</button>
           </div>
-          <button class="order-expand-btn ${expanded ? "open" : ""}" type="button" data-order-expand="${escapeHtml(order.id)}" aria-label="查看详情" title="${expanded ? "收起" : "展开详情"}">▾</button>
         </div>
       </td>
-    </tr>
-    <tr class="order-expand ${expanded ? "" : "hidden"}"><td colspan="8">
-      <div class="order-expand-inner">
-        <strong>本单花型（${patterns.length}）</strong>
-        <div class="order-flowers">${thumbs || '<span class="order-flower-empty">无花型明细</span>'}${patterns.length > 12 ? `<span class="order-flower-more">+${patterns.length - 12}</span>` : ""}</div>
-      </div>
-    </td></tr>`;
+    </tr>`;
 }
 
 function renderOrderCenter() {
@@ -3901,28 +4334,62 @@ function orderPriceValue(order) {
 }
 function orderPriceText(order) {
   const v = orderPriceValue(order);
-  return v == null ? "待输入" : `¥${v.toFixed(2)}`;
+  return v == null ? "待输入" : `¥${v.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 function canEditOrderPrice() {
   return currentAccount.role === "管理员" || currentAccount.role === "销售";
 }
-function editOrderPrice(orderId) {
+function editOrderPrice(orderId, trigger) {
   if (!canEditOrderPrice()) return;
   const order = studioOrders.find((o) => o.id === orderId);
   if (!order) return;
   if (order.paymentStatus === "已支付") { showToast("订单已支付，价格不可再修改。", "warning"); return; }
   const cur = orderPriceValue(order);
-  const input = window.prompt(`设置订单 ${order.id} 的成交价格（元）：`, cur == null ? "" : String(cur));
-  if (input === null) return;
-  const v = Number(String(input).trim());
-  if (!Number.isFinite(v) || v < 0) { showToast("请输入有效的价格数字。", "warning"); return; }
-  const before = cur == null ? "待输入" : `¥${cur.toFixed(2)}`;
-  order.price = v;
-  logOrderEvent(order, `订单价格由 ${before} 变更为 ¥${v.toFixed(2)}`, currentAccount.role || "员工");
-  saveStudioState();
-  renderOrderCenter();
-  if (activeOrderDetailId === order.id) renderOrderDetailBody(order);
-  showToast(`订单 ${order.id} 价格已更新为 ¥${v.toFixed(2)}`, "success");
+  const cell = trigger?.closest(".order-cell-price");
+  if (!cell) return;
+  const previousHtml = cell.innerHTML;
+  cell.innerHTML = `<div class="order-price-editor">
+    <input type="text" inputmode="decimal" autocomplete="off" aria-label="订单成交价格" value="${cur == null ? "" : cur}" placeholder="输入金额" />
+  </div>`;
+  const input = cell.querySelector("input");
+  let cancelled = false;
+  let committed = false;
+  const cancel = () => {
+    cancelled = true;
+    cell.innerHTML = previousHtml;
+  };
+  const save = () => {
+    if (cancelled || committed) return;
+    const raw = String(input.value || "").trim().replace(/[,\s¥￥]/g, "");
+    const v = Number(raw);
+    if (!raw || !Number.isFinite(v) || v < 0 || v > 999999999999.99) {
+      showToast("请输入 0 至 999,999,999,999.99 之间的有效金额。", "warning");
+      requestAnimationFrame(() => input.focus());
+      return;
+    }
+    committed = true;
+    const before = cur == null ? "待输入金额" : orderPriceText(order);
+    order.price = v;
+    order.priceManuallySet = true;
+    logOrderEvent(order, `订单价格由 ${before} 变更为 ${orderPriceText(order)}`, currentAccount.role || "员工");
+    saveStudioState();
+    renderOrderCenter();
+    if (activeOrderDetailId === order.id) renderOrderDetailBody(order);
+    showToast(`订单 ${order.id} 价格已更新为 ${orderPriceText(order)}`, "success");
+  };
+  input.addEventListener("blur", save);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancel();
+    }
+  });
+  input.focus();
+  input.select();
 }
 
 /* 订单动态：客户/员工的每一步操作都留痕，管理员在订单详情能看到 */
@@ -3942,15 +4409,15 @@ function ensureOrderDetailOverlay() {
     #orderDetailOverlay.open{display:block}
     #orderDetailOverlay .odx-scrim{position:absolute;inset:0;background:rgba(28,25,23,.45)}
     #orderDetailOverlay .odx-panel{position:absolute;top:0;right:0;height:100%;width:min(560px,100%);
-      background:#fafaf9;box-shadow:-8px 0 40px rgba(0,0,0,.18);overflow-y:auto;animation:odxIn .2s ease}
-    @keyframes odxIn{from{transform:translateX(30px);opacity:.6}to{transform:none;opacity:1}}
+      background:#fafaf9;box-shadow:-8px 0 40px rgba(0,0,0,.18);overflow-y:auto}
     .odx-head{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #eae8e4;position:sticky;top:0;background:#fafaf9;z-index:2}
     .odx-head h2{margin:0;font-size:18px}
     .odx-close{border:none;background:none;font-size:22px;color:#78716c;cursor:pointer;line-height:1}
     .odx-body{padding:22px 24px 40px}
     .odx-card{background:#fff;border:1px solid #eae8e4;border-radius:16px;padding:18px 20px;margin-bottom:16px}
     .odx-order{display:flex;gap:16px;align-items:center}
-    .odx-thumb{width:80px;height:80px;border-radius:10px;flex:none;background:linear-gradient(135deg,#efe9df,#e6ded0);border:1px solid #eae8e4;background-size:cover;background-position:center}
+    .odx-thumb{position:relative;width:80px;height:80px;border-radius:10px;flex:none;overflow:hidden;background:transparent;border:1px solid #eae8e4}
+    .odx-thumb img,.odx-lock img{display:block;width:100%;height:100%;object-fit:cover}
     .odx-order h3{margin:0 0 6px;font-size:16px}
     .odx-order .m{font-size:13px;color:#57534e;line-height:1.8}.odx-order .m b{color:#1c1917;font-weight:500}
     .odx-steps{display:flex;margin:2px 0}
@@ -3968,7 +4435,7 @@ function ensureOrderDetailOverlay() {
     .odx-pt{font-size:15px;font-weight:600;margin:0 0 12px}
     .odx-note{font-size:13px;color:#57534e;line-height:1.6}
     .odx-locks{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
-    .odx-lock{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:linear-gradient(135deg,#efe9df,#e6ded0);border:1px solid #eae8e4;background-size:cover;background-position:center}
+    .odx-lock{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:transparent;border:1px solid #eae8e4}
     .odx-lock .ov{position:absolute;inset:0;background:rgba(20,18,16,.5);display:grid;place-items:center;color:#fff;text-align:center;font-size:11px}
     .odx-file{display:flex;align-items:center;justify-content:space-between;border:1px solid #eae8e4;border-radius:10px;padding:11px 14px;margin-top:10px}
     .odx-file .n{font-size:14px;font-weight:500}.odx-file .s{font-size:12px;color:#a8a29e}
@@ -4008,6 +4475,18 @@ function openOrderDetail(orderId) {
   document.getElementById("orderDetailOverlay").classList.add("open");
   lockBodyScroll(true);
 }
+
+function orderDetailImageMarkup(card) {
+  const previewSource = cardPreviewSource(card);
+  const imageKey = card?.dataset.imageKey || "";
+  if (previewSource) {
+    return `<img src="${escapeHtml(previewSource)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`;
+  }
+  return imageKey
+    ? `<img data-image-key="${escapeHtml(imageKey)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`
+    : "";
+}
+
 function renderOrderDetailBody(order) {
   const body = document.getElementById("orderDetailBody");
   if (!body) return;
@@ -4015,9 +4494,9 @@ function renderOrderDetailBody(order) {
   const L = orderLifecycleModel(order);
   const patterns = orderPatternList(order);
   const name = patterns.length ? `${patterns[0]}${patterns.length > 1 ? ` 等 ${patterns.length} 款` : ""}` : `${order.customer || "客户"} 订单`;
-  const price = order.price != null ? Number(order.price).toFixed(2) : (patterns.length * 100).toFixed(2);
+  const price = orderPriceText(order);
   const firstCard = sourceCardByFile(patterns[0]);
-  const thumbBg = firstCard?.dataset.imageData ? `background-image:url('${firstCard.dataset.imageData}')` : "";
+  const firstThumb = orderDetailImageMarkup(firstCard);
   // 时间线
   const stageIdx = L.agreement !== "signed" ? 0 : L.payment !== "paid" ? 1 : L.delivery !== "downloaded" ? 2 : 3;
   const stages = ["签约", "支付", "交付", "完成"];
@@ -4029,8 +4508,8 @@ function renderOrderDetailBody(order) {
       action = (L.agreement === "awaiting_signature" || L.agreement === "rejected")
         ? `${L.agreement === "rejected" ? `<div class="odx-note" style="color:#dc2626;margin-bottom:10px">签署文件被驳回${order.reviewRemark ? "：" + escapeHtml(order.reviewRemark) : ""}，请重新上传。</div>` : ""}<button class="odx-btn dark" style="width:100%" data-od-action="sign">${L.agreement === "rejected" ? "重新上传签署文件" : "查看并签署"}</button>`
         : L.agreement === "reviewing"
-        ? `<div class="odx-note">已回传签署文件，工作室审核中，通过后即可支付。</div>`
-        : `<div class="odx-note">销售正在准备协议，请稍候。</div>`;
+        ? `<div class="odx-note">已回传签署文件，正在审核，通过后即可支付。</div>`
+        : `<div class="odx-note">协议正在准备中，请稍候。</div>`;
     } else {
       action = L.agreement === "no_agreement"
         ? `<button class="odx-btn dark" style="width:100%" data-od-action="upload-agreement">上传协议</button>`
@@ -4050,7 +4529,7 @@ function renderOrderDetailBody(order) {
     if (isCustomer) {
       action = L.delivered
         ? `<div class="odx-file"><div><div class="n">交付包（PSD/TIFF/授权书）</div><div class="s">下载链接有效期 30 分钟</div></div><button class="odx-btn" data-od-action="download">下载</button></div>`
-        : `<div class="odx-note">款项已到账，工作室正在准备交付文件。</div>`;
+        : `<div class="odx-note">款项已到账，交付文件正在准备中。</div>`;
     } else {
       action = `<button class="odx-btn ${L.delivered ? "" : "dark"}" style="width:100%" data-od-action="toggle-deliver">${L.delivered ? "取消交付" : "交付并解锁作品"}</button>`;
     }
@@ -4069,9 +4548,9 @@ function renderOrderDetailBody(order) {
 
   body.innerHTML = `
     <div class="odx-card odx-order">
-      <div class="odx-thumb" style="${thumbBg}"></div>
+      <div class="odx-thumb" data-image-shell>${firstThumb}</div>
       <div><h3>${escapeHtml(name)}</h3>
-        <div class="m">订单编号　<b>${escapeHtml(order.id)}</b><br>下单用户　<b>${escapeHtml(order.viewer || order.customer || "—")}</b><br>应付金额　<b>¥${price}</b></div>
+        <div class="m">订单编号　<b>${escapeHtml(order.id)}</b><br>下单用户　<b>${escapeHtml(order.viewer || order.customer || "—")}</b><br>应付金额　<b>${price === "待输入" ? "待输入金额" : price}</b></div>
       </div>
     </div>
     <div class="odx-card">
@@ -4088,9 +4567,10 @@ function renderOrderDetailBody(order) {
     ${(order.activity && order.activity.length) ? `<div class="odx-card"><div class="odx-pt">订单动态</div>
       <div class="odx-feed">${order.activity.slice(0, 12).map((a) => `<div class="odx-ev"><span class="odx-ev-who ${a.who === "客户" ? "cust" : ""}">${escapeHtml(a.who)}</span><div><div class="odx-ev-t">${escapeHtml(a.text)}</div><div class="odx-ev-d">${escapeHtml(a.t)}</div></div></div>`).join("")}</div></div>` : ""}
     <div class="odx-card"><div class="odx-pt">本单花型（${patterns.length}）</div>
-      <div class="odx-locks">${patterns.slice(0, 6).map((f) => { const c = sourceCardByFile(f); const bg = c?.dataset.imageData ? `background-image:url('${c.dataset.imageData}')` : ""; return `<div class="odx-lock" style="${bg}"></div>`; }).join("") || '<div class="odx-note">无花型明细</div>'}</div>
+      <div class="odx-locks">${patterns.slice(0, 6).map((f) => `<div class="odx-lock" data-image-shell>${orderDetailImageMarkup(sourceCardByFile(f))}</div>`).join("") || '<div class="odx-note">无花型明细</div>'}</div>
     </div>`;
 
+  hydrateLazyKeyImages(body);
   body.querySelectorAll("[data-od-action]").forEach((btn) => {
     btn.addEventListener("click", () => onOrderDetailAction(btn.dataset.odAction, order));
   });
@@ -4103,7 +4583,7 @@ const PAY_RESULT_KEY = "king_pay_result";
 function openPaymentPage(order) {
   if (!order) return;
   if (orderPriceValue(order) == null) {
-    showToast("该订单尚未定价，请联系工作室确认价格后再支付。", "warning");
+    showToast("该订单尚未定价，请联系销售确认价格后再支付。", "warning");
     return;
   }
   const patterns = orderPatternList(order);
@@ -4112,17 +4592,19 @@ function openPaymentPage(order) {
   if (!ov) {
     const st = document.createElement("style");
     st.textContent = `
-      #payOverlay{position:fixed;inset:0;z-index:1400;display:none}
+      #payOverlay{position:fixed;inset:0;z-index:1400;display:none;isolation:isolate}
       #payOverlay.open{display:block}
       #payOverlay .pv-scrim{position:absolute;inset:0;background:rgba(20,18,16,.6)}
       #payOverlay .pv-box{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-        width:min(920px,94vw);max-height:88vh;background:#fafaf9;border-radius:18px;overflow:hidden;display:flex;flex-direction:column}
+        width:min(920px,94vw);height:min(720px,88dvh);max-height:88vh;background:#fafaf9;border-radius:18px;
+        overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,.24)}
       #payOverlay .pv-head{display:flex;align-items:center;justify-content:space-between;padding:18px 24px;
         background:#fff;border-bottom:1px solid #eae8e4}
       #payOverlay .pv-head h3{margin:0;font-size:18px}
       #payOverlay .pv-x{border:none;background:none;font-size:22px;color:#78716c;cursor:pointer}
-      #payOverlay .pv-body{display:grid;grid-template-columns:1.3fr 1fr;gap:20px;padding:22px 24px;overflow:hidden;flex:1}
-      #payOverlay .pv-col{overflow-y:auto;overscroll-behavior:contain;padding-right:6px}
+      #payOverlay .pv-body{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(280px,1fr);gap:20px;
+        padding:22px 24px;overflow:hidden;flex:1;min-height:0}
+      #payOverlay .pv-col{min-width:0;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:6px}
       #payOverlay .pv-card{background:#fff;border:1px solid #eae8e4;border-radius:14px;padding:16px 18px;margin-bottom:14px}
       #payOverlay .pv-item{display:flex;gap:14px;align-items:center}
       #payOverlay .pv-item+.pv-item{margin-top:14px;padding-top:14px;border-top:1px solid #f0eeeb}
@@ -4143,11 +4625,33 @@ function openPaymentPage(order) {
       #payOverlay .pv-pay{width:100%;padding:14px;border:none;border-radius:10px;background:#15703c;color:#fff;
         font-size:15px;font-weight:500;cursor:pointer;margin-top:6px}
       #payOverlay .pv-pay:hover{background:#125f33}
+      #payOverlay .pv-pay:disabled{cursor:wait;opacity:.68}
       #payOverlay .pv-note{font-size:12px;color:#a8a29e;text-align:center;margin-top:10px}
-      @media(max-width:820px){#payOverlay .pv-body{grid-template-columns:1fr}}`;
+      #payOverlay .pv-method-detail{margin:16px 0 14px;padding-top:16px;border-top:1px solid #f0eeeb}
+      #payOverlay .pv-qr-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+      #payOverlay .pv-qr-head strong{font-size:14px}
+      #payOverlay .pv-qr-head span{font-size:12px;color:#a8a29e}
+      #payOverlay .pv-qr{width:172px;height:172px;margin:0 auto;padding:10px;border:1px solid #e2e0dc;
+        border-radius:12px;background:#fff}
+      #payOverlay .pv-qr canvas{display:block;width:100%;height:100%}
+      #payOverlay .pv-qr-help{margin:10px 0 0;text-align:center;color:#57534e;font-size:12px}
+      #payOverlay .pv-bank{display:grid;gap:0}
+      #payOverlay .pv-bank-row{display:grid;grid-template-columns:76px minmax(0,1fr);gap:12px;padding:9px 0;
+        border-bottom:1px solid #f0eeeb;font-size:13px}
+      #payOverlay .pv-bank-row span{color:#a8a29e}
+      #payOverlay .pv-bank-row strong{min-width:0;text-align:right;overflow-wrap:anywhere;font-weight:600}
+      #payOverlay .pv-bank-note{margin:12px 0 0;color:#78716c;font-size:12px;line-height:1.6}
+      @media(max-width:820px){
+        #payOverlay .pv-box{height:min(820px,94dvh);max-height:94vh}
+        #payOverlay .pv-body{grid-template-columns:1fr;overflow-y:auto}
+        #payOverlay .pv-col{overflow:visible;padding-right:0}
+      }`;
     document.head.appendChild(st);
     ov = document.createElement("div");
     ov.id = "payOverlay";
+    ov.setAttribute("role", "dialog");
+    ov.setAttribute("aria-modal", "true");
+    ov.setAttribute("aria-hidden", "true");
     ov.innerHTML = `<div class="pv-scrim" data-pv-close></div>
       <div class="pv-box"><div class="pv-head"><h3>确认并支付</h3><button class="pv-x" data-pv-close>×</button></div>
       <div class="pv-body" id="pvBody"></div></div>`;
@@ -4161,13 +4665,14 @@ function openPaymentPage(order) {
   ];
   document.getElementById("pvBody").innerHTML = `
     <div class="pv-col">
-      <div class="pv-card">${patterns.map((f) => {
+      <div class="pv-card">${patterns.slice(0, 12).map((f) => {
         const c = sourceCardByFile(f);
         const nm = c?.querySelector(".work-head strong")?.textContent.trim() || f;
         const bg = c?.dataset.imageData ? `background-image:url('${c.dataset.imageData}')` : "";
         return `<div class="pv-item"><div class="pv-th" style="${bg}"></div>
           <div><div class="pv-nm">${escapeHtml(nm)}</div><div class="pv-cd">${Number(c?.dataset.colors || 1)} 配色</div></div></div>`;
       }).join("")}
+      ${patterns.length > 12 ? `<div class="pv-cd" style="margin-top:12px">另有 ${patterns.length - 12} 款花型，已合并在本订单中</div>` : ""}
       <div class="pv-cd" style="margin-top:14px;padding-top:12px;border-top:1px solid #f0eeeb">订单编号 ${escapeHtml(order.id)}　·　共 ${patterns.length} 款花型</div></div>
       <div class="pv-card"><div style="font-size:14px;font-weight:600;margin-bottom:12px">选择支付方式</div>
         ${METHODS.map((m, i) => `<div class="pv-m ${i === 0 ? "on" : ""}" data-pv-method="${m.n}">
@@ -4180,42 +4685,112 @@ function openPaymentPage(order) {
         <div style="font-size:14px;font-weight:600;margin-bottom:10px">订单摘要</div>
         <div class="pv-row"><span>商品金额</span><span>¥${payable.toFixed(2)}</span></div>
         <div class="pv-row"><span>优惠金额</span><span>¥0.00</span></div>
-        <div class="pv-total"><span style="font-size:15px;font-weight:600">应付金额</span><span class="v">¥${payable.toFixed(2)}</span></div>
+        <div class="pv-total"><span style="font-size:15px;font-weight:600">应付金额</span><span class="v">${orderPriceText(order)}</span></div>
+        <div class="pv-method-detail" id="pvMethodDetail"></div>
         <button class="pv-pay" data-pv-confirm="${escapeHtml(order.id)}">标记为已支付（TEST）</button>
         <div class="pv-note">测试模式：真实支付通道接入后此按钮将移除</div>
       </div>
     </div>`;
   const body = document.getElementById("pvBody");
   body.querySelectorAll("[data-pv-method]").forEach((el) => {
-    el.addEventListener("click", () => body.querySelectorAll(".pv-m").forEach((x) => x.classList.toggle("on", x === el)));
+    el.addEventListener("click", () => {
+      body.querySelectorAll(".pv-m").forEach((x) => x.classList.toggle("on", x === el));
+      renderPaymentMethodDetail(body, order, el.dataset.pvMethod);
+    });
   });
+  renderPaymentMethodDetail(body, order, METHODS[0].n);
   body.querySelector("[data-pv-confirm]")?.addEventListener("click", () => {
+    const confirmButton = body.querySelector("[data-pv-confirm]");
+    if (confirmButton?.disabled) return;
+    if (confirmButton) {
+      confirmButton.disabled = true;
+      confirmButton.textContent = "正在确认支付…";
+    }
     const method = body.querySelector(".pv-m.on")?.dataset.pvMethod || "";
-    confirmPaymentPaid(order, method);
+    window.setTimeout(() => confirmPaymentPaid(order, method), 180);
   });
   logOrderEvent(order, "客户进入支付页", "客户");
   saveStudioState();
+  ov.setAttribute("aria-hidden", "false");
   ov.classList.add("open");
   lockBodyScroll(true);
 }
+
+function drawPaymentQr(canvas, seedText) {
+  if (!canvas) return;
+  const size = 29;
+  const ctx = canvas.getContext("2d");
+  const scale = canvas.width / size;
+  let seed = [...String(seedText || "KING")].reduce((n, ch) => (n * 33 + ch.charCodeAt(0)) >>> 0, 5381);
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#111";
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      if (random() > 0.52) ctx.fillRect(Math.floor(x * scale), Math.floor(y * scale), Math.ceil(scale), Math.ceil(scale));
+    }
+  }
+  const finder = (fx, fy) => {
+    ctx.fillStyle = "#fff";
+    ctx.fillRect((fx - 1) * scale, (fy - 1) * scale, 9 * scale, 9 * scale);
+    ctx.fillStyle = "#111";
+    ctx.fillRect(fx * scale, fy * scale, 7 * scale, 7 * scale);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect((fx + 1) * scale, (fy + 1) * scale, 5 * scale, 5 * scale);
+    ctx.fillStyle = "#111";
+    ctx.fillRect((fx + 2) * scale, (fy + 2) * scale, 3 * scale, 3 * scale);
+  };
+  finder(0, 0);
+  finder(size - 7, 0);
+  finder(0, size - 7);
+}
+
+function renderPaymentMethodDetail(body, order, method) {
+  const panel = body?.querySelector("#pvMethodDetail");
+  if (!panel) return;
+  if (method === "对公转账") {
+    panel.innerHTML = `<div class="pv-qr-head"><strong>对公账户信息</strong><span>转账时请备注订单号</span></div>
+      <div class="pv-bank">
+        <div class="pv-bank-row"><span>收款公司</span><strong>KiNG DESiGN</strong></div>
+        <div class="pv-bank-row"><span>开户银行</span><strong>中国银行南通支行</strong></div>
+        <div class="pv-bank-row"><span>银行账号</span><strong>6217 **** **** 0832</strong></div>
+        <div class="pv-bank-row"><span>转账金额</span><strong>${orderPriceText(order)}</strong></div>
+      </div>
+      <p class="pv-bank-note">请在转账附言中填写“${escapeHtml(order.id)}”。到账状态以财务核对结果为准。</p>`;
+    return;
+  }
+  const isWechat = method === "微信支付";
+  panel.innerHTML = `<div class="pv-qr-head"><strong>${method}案例二维码</strong><span>有效期 5 分钟</span></div>
+    <div class="pv-qr"><canvas width="304" height="304" aria-label="${method}支付二维码"></canvas></div>
+    <p class="pv-qr-help">请使用${isWechat ? "微信扫一扫" : "支付宝"}扫码完成付款</p>`;
+  drawPaymentQr(panel.querySelector("canvas"), `${order.id}-${method}`);
+}
 function closePaymentOverlay() {
-  document.getElementById("payOverlay")?.classList.remove("open");
+  const overlay = document.getElementById("payOverlay");
+  overlay?.classList.remove("open");
+  overlay?.setAttribute("aria-hidden", "true");
   lockBodyScroll(false);
 }
-function confirmPaymentPaid(order, method) {
+async function confirmPaymentPaid(order, method) {
   if (order.paymentStatus === "已支付") { closePaymentOverlay(); return; }
-  order.paymentStatus = "已支付";
-  order.paidAt = formatDateTime();
-  order.paidAmount = orderPriceValue(order);
-  order.paidMethod = method || "";
-  logOrderEvent(order, `支付成功${method ? "（" + method + "）" : ""} · TEST 模拟`, "客户");
-  saveStudioState();
+  await runWithAppLoading("正在确认支付结果…", async () => {
+    order.paymentStatus = "已支付";
+    order.paidAt = formatDateTime();
+    order.paidAmount = orderPriceValue(order);
+    order.paidMethod = method || "";
+    logOrderEvent(order, `支付成功${method ? "（" + method + "）" : ""} · TEST 模拟`, "客户");
+    saveStudioState();
+  }, 520);
   closePaymentOverlay();
   renderOrderCenter();
   if (typeof renderMyOrders === "function") renderMyOrders();
   if (typeof renderMyPatternLibrary === "function") renderMyPatternLibrary();
   updateSidebarBadges();
-  showToast(`支付成功！花型已加入你的花型库，等待工作室交付解锁。`, "success");
+  showToast("支付成功！花型已加入你的花型库，等待交付解锁。", "success");
   if (currentAccount.role === "客户") switchView("myLibrary");
 }
 
@@ -4279,9 +4854,19 @@ function updateSidebarBadges() {
     // 花型库：新解锁的交付
     dot("myLibrary", mine.filter((o) => o.deliverStatus === "已交付" && !o.customerSeenDelivery).length);
   } else {
-    // 员工：客户有新动作（回传签署件 / 已支付待交付）
-    const need = mine.filter((o) => o.signedReviewPending || (o.paymentStatus === "已支付" && orderDeliverStatus(o) !== "已交付")).length;
-    dot("orders", need);
+    // 员工端只提示客户产生的新动作，不把所有未交付订单长期当作未读。
+    if (activeViewId() === "orders") {
+      let changed = false;
+      mine.forEach((order) => {
+        if (Number(order.unreadForStaff || 0) > 0) {
+          order.unreadForStaff = 0;
+          changed = true;
+        }
+      });
+      if (changed) saveStudioState();
+    }
+    const unreadOrders = mine.filter((order) => Number(order.unreadForStaff || 0) > 0).length;
+    dot("orders", unreadOrders);
   }
 }
 
@@ -4459,7 +5044,7 @@ function agreementTermsHtml(order) {
     <div><span>签约客户</span><strong>${escapeHtml(order.customer || "未命名客户")}</strong></div>
     <div><span>授权作品</span><strong>${count} 款花型</strong></div>
     <ol>
-      <li>签署后，工作室才会解锁本订单的高清图及可交付文件。</li>
+      <li>签署后，系统才会解锁本订单的高清图及可交付文件。</li>
       <li>作品仅可在本订单约定的产品及用途范围内使用。</li>
       <li>未经书面许可，不得转售、转授权或向第三方提供源文件。</li>
     </ol>`;
@@ -4470,7 +5055,7 @@ function agreementCustomerHtml(order) {
   return `<div class="agr-info">
       <div><span>订单</span><strong>${escapeHtml(order.id)}</strong></div>
       <div><span>授权作品</span><strong>${orderPatternList(order).length} 款花型</strong></div>
-      <div><span>订单金额</span><strong>¥${(order.price != null ? Number(order.price) : orderPatternList(order).length * 100).toFixed(2)}</strong></div>
+      <div><span>订单金额</span><strong>${orderPriceValue(order) == null ? "待输入金额" : orderPriceText(order)}</strong></div>
     </div>
     <div class="agr-file-plain">
       <div class="agr-file-meta">
@@ -4502,15 +5087,7 @@ function agreementUploadHtml(order) {
     </label>`;
 }
 
-/* 真实文件存取：上传的协议 / 签署件存入 IndexedDB，下载时还原成真实文件 */
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-}
+/* 真实文件存取：上传的协议 / 签署件以 Blob 存入 IndexedDB，下载时还原成真实文件 */
 async function downloadStoredFile(key, filename) {
   try {
     const data = await resolveImageSource(key);
@@ -4532,9 +5109,15 @@ document.querySelector("#deliveryAgreementSummary")?.addEventListener("change", 
   // 员工端：上传合同/协议
   const agrInput = event.target.closest("#agreementFileInput");
   if (agrInput && agrInput.files?.length) {
-    const file = agrInput.files[0];
+    const [file] = acceptedUploadFiles(agrInput.files, {
+      label: "协议",
+      maxBytes: MAX_DOCUMENT_FILE_BYTES,
+      extensions: ["pdf", "doc", "docx"],
+      maxCount: 1,
+    });
+    if (!file) return;
     const key = `agreement_${order.id}_${Date.now()}`;
-    try { await saveImageToDB(key, await readFileAsDataUrl(file)); } catch {}
+    try { await saveImageToDB(key, file); } catch {}
     order.agreementUploaded = true;
     order.agreementFileName = file.name;
     order.agreementFileKey = key;
@@ -4549,9 +5132,15 @@ document.querySelector("#deliveryAgreementSummary")?.addEventListener("change", 
   // 客户端：上传已签署文件
   const signedInput = event.target.closest("#signedFileInput");
   if (signedInput && signedInput.files?.length) {
-    const file = signedInput.files[0];
+    const [file] = acceptedUploadFiles(signedInput.files, {
+      label: "签署文件",
+      maxBytes: MAX_DOCUMENT_FILE_BYTES,
+      extensions: ["pdf", "doc", "docx", "jpg", "jpeg", "png"],
+      maxCount: 1,
+    });
+    if (!file) return;
     const key = `signed_${order.id}_${Date.now()}`;
-    try { await saveImageToDB(key, await readFileAsDataUrl(file)); } catch {}
+    try { await saveImageToDB(key, file); } catch {}
     order.signedFileUploaded = true;
     order.signedFileName = file.name;
     order.signedFileKey = key;
@@ -4565,7 +5154,7 @@ document.querySelector("#deliveryAgreementSummary")?.addEventListener("click", (
   const order = studioOrders.find((item) => item.id === activeAgreementOrderId);
   if (!order) return;
   if (order.agreementFileKey) downloadStoredFile(order.agreementFileKey, order.agreementFileName);
-  else showToast("工作室尚未上传协议文件。", "warning");
+  else showToast("协议文件尚未上传。", "warning");
 });
 
 function openDeliveryAgreementModal(order, customerMode = false) {
@@ -4619,22 +5208,24 @@ document.querySelector("#deliveryAgreementCheck")?.addEventListener("change", (e
   const submit = document.querySelector("#deliveryAgreementSubmit");
   if (submit?.dataset.agreementMode === "customer") submit.disabled = !event.target.checked;
 });
-document.querySelector("#deliveryAgreementSubmit")?.addEventListener("click", (event) => {
+document.querySelector("#deliveryAgreementSubmit")?.addEventListener("click", async (event) => {
   const order = studioOrders.find((item) => item.id === activeAgreementOrderId);
   if (!order) return;
   const customerMode = event.currentTarget.dataset.agreementMode === "customer";
   if (customerMode) {
     if (!order.signedFileUploaded) return;               // 必须先上传已签署文件
-    // 回传即完成签约，直接进入待支付（内部核验不阻塞客户付款）
-    order.agreementStatus = "已签署";
-    order.signedSubmittedAt = formatDateTime();
-    order.signedReviewPending = true;                     // 员工侧提示：有签署件待核验
-    order.agreementSignedBy = currentAccount.name || currentAccount.company || "客户";
-    logOrderEvent(order, `客户回传签署文件：${order.signedFileName || "已签署文件"}`, "客户");
-    saveStudioState();
-    renderMyPatternLibrary();
-    renderOrderCenter();
-    if (typeof renderMyOrders === "function") renderMyOrders();
+    await runWithAppLoading("正在提交签署文件…", async () => {
+      // 回传即完成签约，直接进入待支付（内部核验不阻塞客户付款）
+      order.agreementStatus = "已签署";
+      order.signedSubmittedAt = formatDateTime();
+      order.signedReviewPending = true;                   // 员工侧提示：有签署件待核验
+      order.agreementSignedBy = currentAccount.name || currentAccount.company || "客户";
+      logOrderEvent(order, `客户回传签署文件：${order.signedFileName || "已签署文件"}`, "客户");
+      saveStudioState();
+      renderMyPatternLibrary();
+      renderOrderCenter();
+      if (typeof renderMyOrders === "function") renderMyOrders();
+    }, 520);
     closeDeliveryAgreementModal();
     showToast("签署完成，正在前往支付…", "success");
     openPaymentPage(order);                               // 直接跳转支付
@@ -4643,7 +5234,7 @@ document.querySelector("#deliveryAgreementSubmit")?.addEventListener("click", (e
   if (orderAgreementStatus(order) !== "待客户签署") {
     order.agreementStatus = "待客户签署";
     order.agreementRequestedAt = formatDateTime();
-    order.customerNotice = "工作室已发起签约，请查看并签署协议。";
+    order.customerNotice = "已发起签约，请查看并签署协议。";
     order.customerNoticeAt = formatDateTime();
     logOrderEvent(order, "已发起签约，等待客户签署", currentAccount.role || "员工");
     saveStudioState();
@@ -4655,7 +5246,7 @@ document.querySelector("#deliveryAgreementSubmit")?.addEventListener("click", (e
     return;
   }
   order.agreementRemindedAt = formatDateTime();
-  order.customerNotice = "工作室提醒你尽快签署本订单协议。";
+  order.customerNotice = "请尽快签署本订单协议。";
   order.customerNoticeAt = formatDateTime();
   logOrderEvent(order, "提醒客户签署协议", currentAccount.role || "员工");
   saveStudioState();
@@ -4688,10 +5279,6 @@ function closeOrder(orderId) {
 function deleteStudioOrder(orderId) {
   const order = studioOrders.find((item) => item.id === orderId);
   if (!order) return;
-  if (orderDeliverStatus(order) === "已交付") {
-    showToast("已交付的订单不能删除，请改用关闭或归档。", "warning");
-    return;
-  }
   if (!window.confirm(`确认删除订单 ${order.id}？此操作不可恢复。`)) return;
   studioOrders = studioOrders.filter((item) => item.id !== orderId);
   saveStudioState();
@@ -4793,13 +5380,16 @@ function renderCustomerReviewNote(card) {
 }
 
 async function appendReferenceFiles(card, files) {
-  const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
+  const imageFiles = acceptedUploadFiles(files, {
+    label: "参考图",
+    maxBytes: MAX_IMAGE_FILE_BYTES,
+    imageOnly: true,
+  });
   if (!card || !imageFiles.length) return;
   const keys = getReferenceKeys(card);
   for (let index = 0; index < imageFiles.length; index += 1) {
-    const imageData = await readFileAsDataURL(imageFiles[index]);
     const key = `${card.dataset.file}__reference_${keys.length + index + 1}_${Date.now()}`;
-    await saveImageToDB(key, imageData);
+    await saveImageToDB(key, imageFiles[index]);
     keys.push(key);
   }
   card.dataset.referenceKeys = JSON.stringify(keys);
@@ -4811,21 +5401,29 @@ async function appendReferenceFiles(card, files) {
 
 function syncReviewCardPreviews() {
   document.querySelectorAll(".review-work-card[data-review-file]").forEach((reviewCard) => {
-    const sourceCard = [...workCards].find((card) => card.dataset.file === reviewCard.dataset.reviewFile);
-    const sourceTrigger = sourceCard?.querySelector(".preview-trigger");
+    const sourceCard = sourceCardByFile(reviewCard.dataset.reviewFile);
     const reviewTrigger = reviewCard.querySelector(".preview-trigger");
-    if (!sourceCard || !sourceTrigger || !reviewTrigger) return;
-
-    reviewTrigger.className = sourceTrigger.className;
-    reviewTrigger.style.backgroundImage = sourceTrigger.style.backgroundImage;
-    reviewTrigger.style.backgroundSize = "cover";
-    reviewTrigger.style.backgroundPosition = "center";
-    reviewTrigger.style.backgroundRepeat = "no-repeat";
-    reviewTrigger.style.aspectRatio = "";
-    reviewTrigger.style.minHeight = "";
-    reviewTrigger.innerHTML = "";
-
+    if (!sourceCard || !reviewTrigger) return;
+    reviewTrigger.classList.add("has-image");
+    reviewTrigger.dataset.imageShell = "true";
+    let image = reviewTrigger.querySelector("img");
+    if (!image) {
+      image = document.createElement("img");
+      image.alt = "";
+      image.loading = "lazy";
+      image.decoding = "async";
+      image.fetchPriority = "low";
+      reviewTrigger.prepend(image);
+    }
+    const source = cardPreviewSource(sourceCard);
+    if (source) image.src = source;
+    else if (sourceCard.dataset.imageKey) {
+      image.dataset.imageKey = sourceCard.dataset.imageKey;
+      delete image.dataset.imageQueued;
+      hydrateLazyKeyImages(reviewTrigger);
+    }
     const colorCount = Number(sourceCard.dataset.colors || 1);
+    reviewTrigger.querySelector(".color-count")?.remove();
     if (colorCount > 1) {
       const badge = document.createElement("span");
       badge.className = "color-count";
@@ -4877,11 +5475,17 @@ function renderReviewCalendar() {
 
 function reviewCardHtml(card) {
   const colorCount = Number(card.dataset.colors || 1);
-  const trigger = card.querySelector(".preview-trigger");
-  const patternClass = trigger?.className.replace("preview-trigger", "").trim() || "pattern pattern-a";
-  const imageStyle = card.dataset.imageData ? ` style="background-image:url('${card.dataset.imageData}')"` : "";
+  const previewSource = cardPreviewSource(card);
+  const imageKey = card.dataset.imageKey || "";
   return `<article class="review-work-card${isReviewPending(card) ? "" : " reviewed"}" data-review-file="${card.dataset.file}">
-    <button class="preview-trigger ${patternClass}" type="button" aria-label="查看 ${card.dataset.file}"${imageStyle}>${colorCount > 1 ? `<span class="color-count">${colorCount}</span>` : ""}</button>
+    <button class="preview-trigger has-image" type="button" data-image-shell aria-label="查看 ${card.dataset.file}">
+      ${previewSource
+        ? `<img src="${escapeHtml(previewSource)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`
+        : imageKey
+          ? `<img data-image-key="${escapeHtml(imageKey)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`
+          : ""}
+      ${colorCount > 1 ? `<span class="color-count">${colorCount}</span>` : ""}
+    </button>
     <button class="work-trash-button" type="button" data-delete-file="${escapeHtml(card.dataset.file)}" aria-label="将 ${escapeHtml(card.dataset.file)} 移入回收站" title="移入回收站"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"></path></svg></button>
     <div class="review-hover-info" aria-hidden="true">
       <strong>${escapeHtml(card.dataset.file)}</strong>
@@ -4891,6 +5495,9 @@ function reviewCardHtml(card) {
     </div>
   </article>`;
 }
+
+const REVIEW_RENDER_BATCH = 24;
+let reviewRenderLimit = REVIEW_RENDER_BATCH;
 
 function renderDailyReviewBoard() {
   if (!reviewBoard) return;
@@ -4915,8 +5522,14 @@ function renderDailyReviewBoard() {
     .sort((a, b) => new Date(b.dataset.version) - new Date(a.dataset.version));
   const emptyLabel = activeReviewFilter === "pending" ? "待评审" : activeReviewFilter === "reviewed" ? "已评审" : "评审";
   const workTypeLabel = activeReviewWorkType === "手绘师" ? "手绘稿" : "设计稿";
-  reviewBoard.innerHTML = items.length ? items.map(reviewCardHtml).join("") : `<p class="empty-state">${reviewDateText(activeReviewDate)}没有${emptyLabel}${workTypeLabel}。</p>`;
-  syncReviewCardPreviews();
+  const visibleItems = items.slice(0, reviewRenderLimit);
+  reviewBoard.innerHTML = items.length
+    ? `${visibleItems.map(reviewCardHtml).join("")}${visibleItems.length < items.length
+      ? `<button class="gallery-auto-load-sentinel" type="button" data-gallery-auto-load data-review-load-more tabindex="-1" aria-hidden="true"></button>`
+      : ""}`
+    : `<p class="empty-state">${reviewDateText(activeReviewDate)}没有${emptyLabel}${workTypeLabel}。</p>`;
+  hydrateLazyKeyImages(reviewBoard);
+  observeGalleryAutoLoad(reviewBoard);
 }
 
 function applyPreviewZoom() {
@@ -4971,15 +5584,16 @@ function renderPaletteOptions(card) {
     const sourcePattern = card.querySelector(".preview-trigger");
     const option = document.createElement("button");
     const paletteKey = getPaletteKeys(card)[index - 1];
+    const paletteThumbKey = getPaletteThumbKeys(card)[index - 1] || paletteKey;
     option.type = "button";
     option.className = `palette-option ${index === activeVariant ? "active" : ""}`;
     const paletteEntry = paletteFiles[index - 1];
     option.innerHTML = `<span class="palette-thumb ${sourcePattern.className
       .replace("preview-trigger", "")
-      .trim()} ${index > 1 ? `variant-${index}` : ""}"></span><span>${index === 1 ? "主配色" : escapeHtml(paletteEntry?.name || `配色 ${index}`)}</span>`;
+      .trim()} ${index > 1 ? `variant-${index}` : ""}"></span><span class="palette-name">${index === 1 ? "主配色" : escapeHtml(paletteEntry?.name || `配色 ${index}`)}</span>`;
     const thumb = option.querySelector(".palette-thumb");
-    if (paletteKey) {
-      resolveImageSource(paletteKey).then((imageData) => {
+    if (paletteThumbKey) {
+      resolveImageSource(paletteThumbKey).then((imageData) => {
         if (!imageData) return;
         if (isPreviewablePaletteData(imageData)) {
           thumb.className = "palette-thumb";
@@ -5022,7 +5636,7 @@ function renderPaletteOptions(card) {
     const addTile = document.createElement("button");
     addTile.type = "button";
     addTile.className = "palette-option palette-add-tile";
-    addTile.innerHTML = `<span class="palette-add-plus">＋</span><span>增加配色</span>`;
+    addTile.innerHTML = `<span class="palette-add-plus">＋</span><span class="palette-name">增加配色</span>`;
     addTile.addEventListener("click", () => {
       paletteFileTargetCard = card;
       paletteFileInput.value = "";
@@ -5035,11 +5649,14 @@ function renderPaletteOptions(card) {
 function deletePaletteVariant(card, index) {
   if (index <= 1) return;
   const keys = getPaletteKeys(card);
+  const thumbKeys = getPaletteThumbKeys(card);
   const entries = getPaletteFiles(card);
   if (index > keys.length) return;
   keys.splice(index - 1, 1);
+  thumbKeys.splice(index - 1, 1);
   entries.splice(index - 1, 1);
   setPaletteKeys(card, keys);
+  setPaletteThumbKeys(card, thumbKeys);
   setPaletteFiles(card, entries);
   card.dataset.colors = Math.max(1, keys.length);
   if (activeVariant > keys.length) activeVariant = keys.length;
@@ -5052,24 +5669,31 @@ function deletePaletteVariant(card, index) {
 }
 
 async function appendPaletteFiles(card, files) {
-  const supportedFiles = [...files].filter(isSupportedPaletteFile);
+  const supportedFiles = acceptedUploadFiles([...files].filter(isSupportedPaletteFile), {
+    label: "配色",
+    maxBytes: MAX_IMAGE_FILE_BYTES,
+    extensions: ["jpg", "jpeg", "png", "psd", "tif", "tiff"],
+  });
   if (!card || !supportedFiles.length) return;
   const keys = getPaletteKeys(card);
+  const thumbKeys = getPaletteThumbKeys(card);
   const entries = getPaletteFiles(card);
   if (!keys.length) keys.push(card.dataset.imageKey || card.dataset.file);
+  if (!thumbKeys.length) thumbKeys.push(card.dataset.imageKey || card.dataset.file);
   if (!entries.length) entries.push({ name: card.dataset.file, key: keys[0], type: "image/jpeg", primary: true });
   const availableSlots = Math.max(0, MAX_UPLOAD_FILES - (keys.length - 1));
   const accepted = supportedFiles.slice(0, availableSlots);
   if (supportedFiles.length > accepted.length) showToast("超过最大上传数量", "warning");
   for (let index = 0; index < accepted.length; index += 1) {
     const file = accepted[index];
-    const imageData = await readFileAsDataURL(file);
-    const key = `${card.dataset.file}__color_${keys.length + 1}_${Date.now()}_${index}`;
-    await saveImageToDB(key, imageData);
-    keys.push(key);
-    entries.push({ name: file.name, key, type: file.type || "application/octet-stream", primary: false });
+    const baseKey = `${card.dataset.file}__color_${keys.length + 1}_${Date.now()}_${index}`;
+    const tiers = await persistArtworkImageTiers(baseKey, file);
+    keys.push(tiers.previewKey);
+    thumbKeys.push(tiers.thumbKey);
+    entries.push({ name: file.name, key: tiers.originalKey, type: file.type || "application/octet-stream", primary: false });
   }
   setPaletteKeys(card, keys);
+  setPaletteThumbKeys(card, thumbKeys);
   setPaletteFiles(card, entries);
   card.dataset.colors = keys.length;
   enhanceOneWorkCard(card);
@@ -5081,16 +5705,17 @@ async function appendPaletteFiles(card, files) {
 
 function renderReferenceMaterials(card) {
   const linkedPainter = fieldValue(card, "引用手绘");
-  const linkedPainterWork = painterLibrary.find((item) => linkedPainter.includes(item.file) || (linkedPainter.includes(item.painter) && linkedPainter.includes(item.title)));
+  const linkedPainterWork = painterWorkCatalog().find((item) => linkedPainter.includes(item.file) || (linkedPainter.includes(item.painter) && linkedPainter.includes(item.title)));
   const referenceMaterial = fieldValue(card, "参考素材");
   const referenceKeys = getReferenceKeys(card);
+  const referenceText = referenceMaterial.includes("原创声明") ? "原创声明" : referenceMaterial || "未提供参考图";
   const items = [
     `<article><strong>手绘素材</strong>${linkedPainterWork ? `<button class="lightbox-painter-link" type="button" data-linked-painter-file="${escapeHtml(linkedPainterWork.file)}">${escapeHtml(linkedPainter)}</button>` : `<span>${escapeHtml(linkedPainter || "无引用 / 原创设计")}</span>`}</article>`,
-    `<article class="reference-image-row"><strong>参考图</strong><div class="reference-preview-grid">${
+    `<article class="reference-image-row"><strong>参考图 / 原创声明</strong><div class="reference-preview-grid">${
       referenceKeys.length
         ? referenceKeys.map((key, index) => `<button class="reference-preview" type="button" data-reference-key="${escapeHtml(key)}">参考图 ${index + 1}</button>`).join("")
-        : `<span class="reference-text-only">${escapeHtml(referenceMaterial || "未提供参考图")}</span>`
-    }</div>${referenceKeys.length ? "" : `<em>${escapeHtml(referenceMaterial || "未提供参考图")}</em>`}</article>`,
+        : `<p class="reference-empty-state">${escapeHtml(referenceText)}</p>`
+    }</div></article>`,
   ];
   referenceMaterialList.innerHTML = items.join("");
   referenceMaterialList.querySelectorAll("[data-reference-key]").forEach((item) => {
@@ -5208,10 +5833,10 @@ function renderLightbox() {
   if (showSourceFile) {
     sourceFileTargetCard = card;
     const sourceFiles = getSourceFiles(card);
-    if (sourceFileStatus) sourceFileStatus.textContent = "";
+    if (sourceFileStatus) if (sourceFileStatus) sourceFileStatus.textContent = "";
     sourceFileDownloadList.innerHTML = sourceFiles.length
       ? sourceFiles.map((file, index) => `<button class="source-file-download-item" type="button" data-source-file-index="${index}"><span>${escapeHtml(file.name || `源文件 ${index + 1}`)}</span><b>下载</b></button>`).join("")
-      : '<p class="source-file-empty">上传者未提供源文件</p>';
+      : '<p class="source-file-empty">未上传源文件</p>';
   }
   if (inOrder) {
     renderOrderFilePanel();
@@ -5316,6 +5941,7 @@ function sortWorkCards() {
   });
 
   cards.forEach((card) => worksBoard.appendChild(card));
+  applyWorkGalleryBatch();
 }
 
 function workInTimeRange(card) {
@@ -5438,7 +6064,7 @@ function updateLibraryResultCount() {
     && !card.classList.contains("filtered-hidden")
     && !card.classList.contains("time-hidden")
   ).length;
-  libraryResultCount.textContent = `共找到 ${count} 个作品`;
+  if (libraryResultCount) libraryResultCount.textContent = `共找到 ${count} 个作品`;
 }
 
 function applyLibraryFilters() {
@@ -5450,11 +6076,14 @@ function applyLibraryFilters() {
       if (!state.size) return true;
       return cardLibraryValues(card, row.key).some((value) => state.has(value));
     });
-    const approvedOk = !approvedOnly || fieldValue(card, "审核状态").includes("已通过");
+    const approvedOk = !approvedOnly
+      || card.dataset.workRole === "手绘师"
+      || fieldValue(card, "审核状态").includes("已通过");
     card.classList.toggle("filtered-hidden", !(matchesFilters && approvedOk));
   });
   renderLibrarySelectedConditions();
   updateLibraryResultCount();
+  applyWorkGalleryBatch(true);
 }
 
 libraryFilterBar?.addEventListener("change", (event) => {
@@ -5575,6 +6204,7 @@ function clearViewerLibraryFilters() {
   viewerLibraryFilterConfig.forEach((row) => viewerLibraryFilterState[row.key].clear());
   renderViewerLibraryFilterBar();
   renderViewerLibrarySelectedConditions();
+  libraryGridRenderLimit = LIBRARY_GRID_BATCH;
   renderLibraryGrid();
 }
 
@@ -5587,6 +6217,7 @@ viewerLibraryFilterBar?.addEventListener("change", (event) => {
   else state.delete(input.value);
   renderViewerLibraryFilterBar();
   renderViewerLibrarySelectedConditions();
+  libraryGridRenderLimit = LIBRARY_GRID_BATCH;
   renderLibraryGrid();
 });
 
@@ -5597,6 +6228,7 @@ viewerLibraryFilterBar?.addEventListener("click", (event) => {
     viewerLibraryFilterState[remove.dataset.viewerLibRemoveCat].delete(remove.dataset.viewerLibRemoveVal);
     renderViewerLibraryFilterBar();
     renderViewerLibrarySelectedConditions();
+    libraryGridRenderLimit = LIBRARY_GRID_BATCH;
     renderLibraryGrid();
     return;
   }
@@ -5627,10 +6259,14 @@ viewerLibrarySelectedConditions?.addEventListener("click", (event) => {
   viewerLibraryFilterState[remove.dataset.viewerLibRemoveCat].delete(remove.dataset.viewerLibRemoveVal);
   renderViewerLibraryFilterBar();
   renderViewerLibrarySelectedConditions();
+  libraryGridRenderLimit = LIBRARY_GRID_BATCH;
   renderLibraryGrid();
 });
 
-viewerLibrarySort?.addEventListener("change", renderLibraryGrid);
+viewerLibrarySort?.addEventListener("change", () => {
+  libraryGridRenderLimit = LIBRARY_GRID_BATCH;
+  renderLibraryGrid();
+});
 renderViewerLibraryFilterBar();
 
 function enhanceOneWorkCard(card) {
@@ -5670,7 +6306,8 @@ function enhanceOneWorkCard(card) {
       hover.className = "work-hover-info";
       trigger.appendChild(hover);
     }
-    hover.innerHTML = `<span>上传者：${escapeHtml(workOwnerName(card))}</span>`
+    hover.innerHTML = `<strong>${escapeHtml(card.dataset.file)}</strong>`
+      + `<span>${isPainter ? "手绘稿" : "设计稿"} · ${escapeHtml(workOwnerName(card))}</span>`
       + `<span>时间：${escapeHtml(card.dataset.version || "-")}</span>`
       + `<span>配色：${Number(card.dataset.colors || 1)} 个</span>`;
   }
@@ -5711,6 +6348,7 @@ function enhanceOneWorkCard(card) {
   }
   const reviewSummary = fieldValue(card, "审核状态");
   card.classList.toggle("needs-revision", reviewSummary.includes("需修改") || reviewSummary.includes("未修改"));
+  syncPersonalReviewStatus(card);
 }
 
 function enhanceWorkCards() {
@@ -5772,7 +6410,7 @@ function projectOptions() {
 function painterWorkOptions() {
   return [
     { value: "无引用 / 原创设计", label: "无引用 / 原创设计" },
-    ...painterLibrary.map((item) => ({
+    ...painterWorkCatalog().map((item) => ({
       value: `${item.painter} / ${item.title}`,
       label: `${item.painter} / ${item.title} / ${item.file}`,
     })),
@@ -6003,10 +6641,10 @@ function renderProjectTypeOptions() {
 function renderProjectNoteLog() {
   if (!projectNoteLog) return;
   if (!projectNoteLogs.length) {
-    projectNoteLog.textContent = "暂无备注日志。";
+    if (projectNoteLog) projectNoteLog.textContent = "暂无备注日志。";
     return;
   }
-  projectNoteLog.innerHTML = projectNoteLogs
+  if (projectNoteLog) projectNoteLog.innerHTML = projectNoteLogs
     .map((item) => `<article><strong>${escapeHtml(item.time)}${item.user ? ` / ${escapeHtml(item.user)}` : ""}</strong><p>${escapeHtml(item.text)}</p></article>`)
     .join("");
 }
@@ -6247,13 +6885,16 @@ async function serializeProjectFiles(files, uploadedAt, previousCreatedAt) {
   for (const file of files || []) {
     if (!file) continue;
     if (isBrowserFile(file)) {
+      const key = `project_file_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      await saveImageToDB(key, file);
       stored.push({
         name: file.name,
         type: file.type || "",
         size: file.size || 0,
         time: uploadedAt,
         uploader: currentAccount.name,
-        dataUrl: await readFileAsDataURL(file),
+        key,
+        dataUrl: "",
       });
     } else if (typeof file === "string") {
       stored.push({
@@ -6271,6 +6912,7 @@ async function serializeProjectFiles(files, uploadedAt, previousCreatedAt) {
         size: file.size || 0,
         time: file.time || previousCreatedAt || uploadedAt,
         uploader: file.uploader || "项目资料",
+        key: file.key || "",
         dataUrl: file.dataUrl || "",
       });
     }
@@ -6424,7 +7066,7 @@ function saveProjectDetailDraft(projectId) {
 }
 
 function renderProjectDrafts() {
-  if (projectDraftCount) projectDraftCount.textContent = String(projectDrafts.length);
+  if (projectDraftCount) if (projectDraftCount) projectDraftCount.textContent = String(projectDrafts.length);
   if (!projectDraftList) return;
   projectDraftList.innerHTML = projectDrafts.length ? projectDrafts.map((draft) => `<article class="project-draft-row">
     <button type="button" data-project-draft-open="${escapeHtml(draft.id)}"><strong>${escapeHtml(draft.name || "未命名项目")}</strong><span>${draft.kind === "edit" ? "项目修改" : "新建项目"} · ${escapeHtml(draft.savedAt || "")}</span></button>
@@ -6556,6 +7198,7 @@ function projectFileEntries(project) {
       time: file.time || project.createdAt || "",
       uploader: file.uploader || "项目资料",
       source: "立项资料",
+      key: file.key || "",
       dataUrl: file.dataUrl || "",
     };
   });
@@ -6584,7 +7227,7 @@ function projectFileTileHtml(file, index, mode = "detail") {
 
 function projectFolderHtml(project) {
   const files = projectFileEntries(project);
-  const uploadButton = projectParticipantCanUpload(project) && !project.archived && projectStage(project) !== "已交付"
+  const uploadButton = projectParticipantCanUpload(project) && !project.archived
     ? `<button class="primary-button project-upload-button" type="button" data-project-upload="${escapeHtml(project.id)}">上传文件</button>`
     : "";
   return `<div class="project-folder-head">
@@ -6638,18 +7281,10 @@ function projectLifecyclePanelHtml(project) {
       actions.push(action("deadline", "修改截止日期"));
       actions.push(action("terminate", "终止项目", "danger"));
     } else if (stage === "内部定稿") {
-      actions.push(action("to-delivery", "进入待交付", "primary"));
+      actions.push(action("complete", "完成并归档", "primary"));
       actions.push(action("back-revision", "退回修改完善"));
+      actions.push(action("deadline", "修改截止日期"));
       actions.push(action("terminate", "终止项目", "danger"));
-    } else if (stage === "待交付") {
-      actions.push(action("edit-delivery", "编辑交付内容"));
-      actions.push(action("deliver", "确认已交付", "primary"));
-      actions.push(action("back-final", "退回内部定稿"));
-      actions.push(action("terminate", "终止项目", "danger"));
-    } else if (stage === "已交付") {
-      actions.push(action("view-delivery", "查看交付内容"));
-      actions.push(action("complete", "完成项目", "primary"));
-      actions.push(action("reopen-delivery", "重新打开交付"));
     } else {
       actions.push(action("pause", "暂停项目"));
       actions.push(action("deadline", "修改截止日期"));
@@ -6685,7 +7320,7 @@ function projectDetailHtml(project) {
   <div class="project-detail-summary project-detail-fields">
     <section class="project-detail-edit-field detail-search-combobox" data-project-detail-search="customer"><b>客户</b><div class="detail-search-control"><input data-project-detail-field="customer" value="${escapeHtml(customerText)}" placeholder="输入名称搜索客户" autocomplete="off" /><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></div><div class="detail-search-results">${searchOptions([...new Set([...projectCustomerNames(), customerText])], "customer")}</div></section>
     <section class="project-detail-type-field"><b>项目类别</b><div class="project-type-options" data-project-detail-type>${["选稿", "定制", "内部"].map((type) => `<button class="${projectTypeValue(project) === type ? "active" : ""}" type="button" data-project-detail-type-option="${type}">${type === "内部" ? "内部项目" : type}</button>`).join("")}</div></section>
-    <section class="project-detail-status-field"><b>项目阶段</b><div class="project-status-options" data-project-detail-status>${projectBoardStages.map((item) => `<button class="${projectStage(project) === item.status ? "active" : ""}" type="button" data-project-detail-status-option="${escapeHtml(item.status)}" ${item.status === "已交付" ? "disabled title=\"需要先完成交付记录\"" : ""}>${escapeHtml(item.status)}</button>`).join("")}</div></section>
+    <section class="project-detail-status-field"><b>项目阶段</b><div class="project-status-options" data-project-detail-status>${projectBoardStages.map((item) => `<button class="${projectStage(project) === item.status ? "active" : ""}" type="button" data-project-detail-status-option="${escapeHtml(item.status)}">${escapeHtml(item.status)}</button>`).join("")}</div></section>
     <section class="project-time-card"><b>项目时间</b>
       <div class="project-time-strip">
         <label><i>开始</i><input type="date" min="1000-01-01" max="9999-12-31" value="${escapeHtml(validProjectDate(project.startAt) ? project.startAt : "")}" data-project-detail-field="startAt" /></label>
@@ -6813,23 +7448,6 @@ function saveProjectDetailChanges(projectId) {
   }
   const activeType = projectDetailBody.querySelector("[data-project-detail-type-option].active")?.dataset.projectDetailTypeOption || projectTypeValue(project);
   const activeStatus = projectDetailBody.querySelector("[data-project-detail-status-option].active")?.dataset.projectDetailStatusOption || projectStage(project);
-  const previousStage = projectStage(project);
-  if (activeStatus === "已交付" && !projectHasValidDelivery(project)) {
-    showToast("请先完成交付记录，再进入已交付阶段。", "warning");
-    return;
-  }
-  if (previousStage === "已交付" && activeStatus !== "已交付") {
-    showToast("已交付项目请使用“重新打开交付”。", "warning");
-    return;
-  }
-  if (activeStatus === "待交付" && previousStage !== "内部定稿" && previousStage !== "待交付") {
-    showToast("只有内部定稿项目可以进入待交付。", "warning");
-    return;
-  }
-  if (previousStage === "待交付" && !["待交付", "内部定稿"].includes(activeStatus)) {
-    showToast("待交付项目只能保留当前阶段或退回内部定稿。", "warning");
-    return;
-  }
   const previous = {
     ...project,
     designers: [...(project.designers || [])],
@@ -6895,7 +7513,6 @@ function changeProjectStage(project, nextStage, actionLabel) {
   const previous = projectStage(project);
   if (previous === nextStage) return;
   setProjectStage(project, nextStage);
-  if (nextStage !== "已交付") project.deliveryStatus = project.deliveryStatus === "delivered" ? "pending" : project.deliveryStatus;
   projectLog(project, actionLabel || "调整阶段", `${previous} → ${nextStage}`);
   persistProjectLifecycle(project, `项目已进入「${nextStage}」。`);
 }
@@ -6923,7 +7540,7 @@ function archiveProject(project, result, reason, extra = {}) {
 
 function renderProjectArchiveCount() {
   if (!projectArchiveCount) return;
-  projectArchiveCount.textContent = String(customProjects.filter((project) => project.archived || project.projectResult).length);
+  if (projectArchiveCount) projectArchiveCount.textContent = String(customProjects.filter((project) => project.archived || project.projectResult).length);
 }
 
 function archiveTimeMatches(project, days) {
@@ -6994,29 +7611,7 @@ function closeProjectLifecycleModal() {
   projectLifecycleModal?.classList.remove("active");
   projectLifecycleModal?.setAttribute("aria-hidden", "true");
   pendingProjectLifecycleAction = null;
-  pendingProjectLifecycleFiles = [];
   lockBodyScroll(Boolean(projectDetailModal?.classList.contains("active") || projectArchiveModal?.classList.contains("active")));
-}
-
-function deliveryFilesSummary(files) {
-  return files.length
-    ? `<div class="project-delivery-file-list">${files.map((file) => `<span>${escapeHtml(file.name || "交付文件")}<small>${escapeHtml(file.version || "")}</small></span>`).join("")}</div>`
-    : `<p class="project-delivery-empty">尚未上传交付文件</p>`;
-}
-
-function updateDeliveryConfirmationState() {
-  if (!pendingProjectLifecycleAction || !["delivery", "deliver"].includes(pendingProjectLifecycleAction.action)) return;
-  const contractRequired = projectLifecycleBody.querySelector('[name="requiresContract"]')?.checked;
-  const contractSigned = projectLifecycleBody.querySelector('[name="contractSigned"]')?.checked;
-  const paymentRequired = projectLifecycleBody.querySelector('[name="requiresPayment"]')?.checked;
-  const paymentSatisfied = projectLifecycleBody.querySelector('[name="paymentSatisfied"]')?.checked;
-  const missing = [];
-  if (!pendingProjectLifecycleFiles.length) missing.push("交付文件");
-  if (contractRequired && !contractSigned) missing.push("已签署合同");
-  if (paymentRequired && !paymentSatisfied) missing.push("支付条件");
-  const guard = projectLifecycleBody.querySelector("[data-delivery-guard]");
-  if (guard) guard.textContent = missing.length ? `确认交付前还需要：${missing.join("、")}` : "交付条件已满足。";
-  if (pendingProjectLifecycleAction.action === "deliver") projectLifecycleConfirm.disabled = missing.length > 0;
 }
 
 function projectLifecycleFormHtml(project, action) {
@@ -7028,51 +7623,29 @@ function projectLifecycleFormHtml(project, action) {
   if (action === "terminate") return `
     <label><span>终止原因</span><textarea name="reason" rows="3" placeholder="请填写终止原因"></textarea></label>
     <label><span>当前完成情况</span><textarea name="completion" rows="3" placeholder="说明目前已经完成的内容"></textarea></label>
-    <label class="project-lifecycle-check"><input name="hasDeliveredContent" type="checkbox" /><span>存在已交付内容</span></label>
     <label><span>补充说明</span><textarea name="note" rows="3" placeholder="可选"></textarea></label>`;
-  if (["delivery", "deliver", "view-delivery"].includes(action)) {
-    const readOnly = action === "view-delivery";
-    return `
-      <label><span>接收方</span><input name="receiver" value="${escapeHtml(project.deliveryReceiver || project.customer || "")}" ${readOnly ? "readonly" : ""} /></label>
-      <label><span>文件版本</span><input name="version" value="${escapeHtml(project.deliveryVersion || "V1")}" ${readOnly ? "readonly" : ""} /></label>
-      ${readOnly ? "" : `<label class="project-delivery-upload"><span>交付文件</span><input name="deliveryFiles" type="file" multiple /><small>可一次选择多个文件</small></label>`}
-      ${deliveryFilesSummary(pendingProjectLifecycleFiles)}
-      <label><span>交付备注</span><textarea name="note" rows="4" ${readOnly ? "readonly" : ""}>${escapeHtml(project.deliveryNote || "")}</textarea></label>
-      ${readOnly ? "" : `<div class="project-delivery-conditions">
-        <label class="project-lifecycle-check"><input name="requiresContract" type="checkbox" ${project.requiresContract ? "checked" : ""} /><span>项目需要合同</span></label>
-        <label class="project-lifecycle-check"><input name="contractSigned" type="checkbox" ${project.contractSigned ? "checked" : ""} /><span>合同已签署</span></label>
-        <label class="project-lifecycle-check"><input name="requiresPayment" type="checkbox" ${project.requiresPayment ? "checked" : ""} /><span>项目需要满足支付条件</span></label>
-        <label class="project-lifecycle-check"><input name="paymentSatisfied" type="checkbox" ${project.paymentSatisfied ? "checked" : ""} /><span>支付条件已满足</span></label>
-      </div><p class="project-delivery-guard" data-delivery-guard></p>`}
-      ${readOnly ? `<dl class="project-delivery-record"><div><dt>交付时间</dt><dd>${escapeHtml(project.deliveredAt || "-")}</dd></div><div><dt>交付负责人</dt><dd>${escapeHtml(project.deliveredBy || "-")}</dd></div></dl>` : ""}`;
-  }
   if (action === "reopen") return `<label><span>重新打开原因</span><textarea name="reason" rows="4" placeholder="请说明重新打开项目的原因"></textarea></label>`;
   return "";
 }
 
 function openProjectLifecycleModal(project, action) {
   pendingProjectLifecycleAction = { projectId: project.id, action };
-  pendingProjectLifecycleFiles = [...(project.deliveryFiles || [])];
   const titleMap = {
     pause: "暂停项目",
     deadline: "修改截止日期",
     cancel: "取消项目",
     terminate: "终止项目",
-    delivery: "编辑交付内容",
-    deliver: "确认项目交付",
-    "view-delivery": "查看交付内容",
     reopen: "重新打开项目",
   };
   projectLifecycleTitle.textContent = titleMap[action] || "项目操作";
   projectLifecycleBody.innerHTML = projectLifecycleFormHtml(project, action);
-  projectLifecycleConfirm.textContent = action === "view-delivery" ? "关闭" : action === "delivery" ? "保存交付内容" : action === "deliver" ? "确认已交付" : "确认";
+  projectLifecycleConfirm.textContent = "确认";
   projectLifecycleConfirm.classList.toggle("danger-button", ["cancel", "terminate"].includes(action));
   projectLifecycleConfirm.classList.toggle("primary-button", !["cancel", "terminate"].includes(action));
   projectLifecycleConfirm.disabled = false;
   projectLifecycleModal.classList.add("active");
   projectLifecycleModal.setAttribute("aria-hidden", "false");
   lockBodyScroll(true);
-  updateDeliveryConfirmationState();
 }
 
 function handleProjectLifecycleAction(project, action) {
@@ -7093,54 +7666,13 @@ function handleProjectLifecycleAction(project, action) {
     persistProjectLifecycle(project, `${project.name} 已恢复。`);
     return;
   }
-  if (action === "to-delivery") {
-    if (stage !== "内部定稿") return showToast("只有内部定稿阶段可以进入待交付。", "warning");
-    changeProjectStage(project, "待交付", "进入交付");
-    return;
-  }
   if (action === "back-revision") {
     changeProjectStage(project, "修改完善", "退回修改");
     return;
   }
-  if (action === "back-final") {
-    changeProjectStage(project, "内部定稿", "退回内部定稿");
-    return;
-  }
-  if (action === "edit-delivery") {
-    openProjectLifecycleModal(project, "delivery");
-    return;
-  }
-  if (action === "deliver") {
-    openProjectLifecycleModal(project, "deliver");
-    return;
-  }
-  if (action === "view-delivery") {
-    openProjectLifecycleModal(project, "view-delivery");
-    return;
-  }
-  if (action === "reopen-delivery") {
-    openExitConfirmation({
-      title: "重新打开交付？",
-      message: "项目将退回待交付，已保存的交付内容和历史记录会继续保留。",
-      submitText: "确认重新打开",
-      onConfirm: () => {
-        project.deliveryHistory = [{
-          deliveredAt: project.deliveredAt,
-          deliveredBy: project.deliveredBy,
-          files: [...(project.deliveryFiles || [])],
-          note: project.deliveryNote || "",
-        }, ...(project.deliveryHistory || [])];
-        project.deliveryStatus = "prepared";
-        setProjectStage(project, "待交付");
-        projectLog(project, "重新打开交付", "已交付 → 待交付");
-        persistProjectLifecycle(project, "交付已重新打开。");
-      },
-    });
-    return;
-  }
   if (action === "complete") {
-    if (stage !== "已交付" || !projectHasValidDelivery(project)) {
-      showToast("只有存在有效交付记录的已交付项目才能完成。", "warning");
+    if (stage !== "内部定稿") {
+      showToast("项目进入内部定稿后才能确认完成。", "warning");
       return;
     }
     openExitConfirmation({
@@ -7151,7 +7683,7 @@ function handleProjectLifecycleAction(project, action) {
         const now = formatDateTime();
         project.completedAt = now;
         project.completedBy = currentAccount.name || currentAccount.role;
-        archiveProject(project, "completed", "项目已完成并交付");
+        archiveProject(project, "completed", "项目已完成");
       },
     });
   }
@@ -7163,7 +7695,6 @@ async function submitProjectLifecycleAction() {
   const project = customProjects.find((item) => item.id === pending.projectId);
   if (!project) return closeProjectLifecycleModal();
   const now = formatDateTime();
-  if (pending.action === "view-delivery") return closeProjectLifecycleModal();
   if (pending.action === "pause") {
     const reason = lifecycleFieldValue("reason");
     if (!reason) return showToast("请填写暂停原因。", "warning");
@@ -7197,14 +7728,12 @@ async function submitProjectLifecycleAction() {
     const completion = lifecycleFieldValue("completion");
     if (!reason || !completion) return showToast("请填写终止原因和当前完成情况。", "warning");
     const note = lifecycleFieldValue("note");
-    const hasDeliveredContent = Boolean(projectLifecycleBody?.querySelector('[name="hasDeliveredContent"]')?.checked);
     project.terminatedAt = now;
     project.terminatedBy = currentAccount.name || currentAccount.role;
     closeProjectLifecycleModal();
     return archiveProject(project, "terminated", reason, {
       terminationReason: reason,
       terminationCompletion: completion,
-      hasDeliveredContent,
       terminationNote: note,
     });
   }
@@ -7212,7 +7741,7 @@ async function submitProjectLifecycleAction() {
     const reason = lifecycleFieldValue("reason");
     if (!reason) return showToast("请填写重新打开原因。", "warning");
     const previousResult = project.projectResult;
-    const nextStage = previousResult === "completed" ? "待交付" : previousResult === "cancelled" ? "需求确认" : normalizeProjectBoardStatus(project.archivedFromStage || "需求确认");
+    const nextStage = previousResult === "completed" ? "内部定稿" : previousResult === "cancelled" ? "需求确认" : normalizeProjectBoardStatus(project.archivedFromStage || "需求确认");
     project.archiveHistory = [{
       reopenedAt: now,
       reopenedBy: currentAccount.name || currentAccount.role,
@@ -7226,42 +7755,11 @@ async function submitProjectLifecycleAction() {
     project.archived = false;
     project.archivedAt = "";
     project.projectStatus = "normal";
-    if (previousResult === "completed") project.deliveryStatus = "prepared";
     setProjectStage(project, nextStage);
     projectLog(project, "重新打开项目", `${projectResultLabels[previousResult] || "归档"} → ${nextStage}；${reason}`);
     closeProjectLifecycleModal();
     closeProjectArchiveModal();
     return persistProjectLifecycle(project, `${project.name} 已重新打开。`);
-  }
-  if (["delivery", "deliver"].includes(pending.action)) {
-    const receiver = lifecycleFieldValue("receiver");
-    const version = lifecycleFieldValue("version");
-    if (!receiver) return showToast("请填写接收方。", "warning");
-    if (!pendingProjectLifecycleFiles.length) return showToast("请上传至少一份交付文件。", "warning");
-    project.deliveryFiles = await serializeProjectFiles(pendingProjectLifecycleFiles, now, project.createdAt);
-    project.deliveryFiles = project.deliveryFiles.map((file) => ({ ...file, version }));
-    project.deliveryReceiver = receiver;
-    project.deliveryVersion = version;
-    project.deliveryNote = lifecycleFieldValue("note");
-    project.requiresContract = Boolean(projectLifecycleBody.querySelector('[name="requiresContract"]')?.checked);
-    project.contractSigned = Boolean(projectLifecycleBody.querySelector('[name="contractSigned"]')?.checked);
-    project.requiresPayment = Boolean(projectLifecycleBody.querySelector('[name="requiresPayment"]')?.checked);
-    project.paymentSatisfied = Boolean(projectLifecycleBody.querySelector('[name="paymentSatisfied"]')?.checked);
-    if (pending.action === "deliver") {
-      if ((project.requiresContract && !project.contractSigned) || (project.requiresPayment && !project.paymentSatisfied)) {
-        return showToast("合同或支付条件尚未满足，暂时不能确认交付。", "warning");
-      }
-      project.deliveryStatus = "delivered";
-      project.deliveredAt = now;
-      project.deliveredBy = currentAccount.name || currentAccount.role;
-      setProjectStage(project, "已交付");
-      projectLog(project, "确认交付", `${receiver} · ${version || "未标注版本"} · ${project.deliveryFiles.length} 份文件`);
-    } else {
-      project.deliveryStatus = "prepared";
-      projectLog(project, "更新交付内容", `${receiver} · ${project.deliveryFiles.length} 份文件`);
-    }
-    closeProjectLifecycleModal();
-    return persistProjectLifecycle(project, pending.action === "deliver" ? "项目已确认交付。" : "交付内容已保存。");
   }
 }
 
@@ -7273,13 +7771,20 @@ function isProjectPdfFile(file) {
   return String(file?.type || "").includes("pdf") || /\.pdf$/i.test(file?.name || "");
 }
 
-function downloadProjectFile(file) {
-  if (!file?.dataUrl) {
+async function projectFileSource(file) {
+  if (file?.dataUrl && !String(file.dataUrl).startsWith("blob:")) return file.dataUrl;
+  if (file?.key) return resolveImageSource(file.key);
+  return "";
+}
+
+async function downloadProjectFile(file) {
+  const source = await projectFileSource(file);
+  if (!source) {
     showToast("这个历史文件没有保存实体内容，请重新上传后下载。", "warning");
     return;
   }
   const link = document.createElement("a");
-  link.href = file.dataUrl;
+  link.href = source;
   link.download = file.name || "项目文件";
   link.click();
   showToast(`${file.name || "项目文件"} 下载已开始。`, "success");
@@ -7317,29 +7822,30 @@ function renderProjectFilePalette(project, files) {
   if (projectFileViewerNote) projectFileViewerNote.textContent = project?.note || "暂无设计备注";
 }
 
-function renderProjectFileViewer() {
+async function renderProjectFileViewer() {
   const project = activeProject();
   const files = projectFileEntries(project);
   const file = files[activeProjectFileIndex];
   if (!project || !file) return;
   const isImage = String(file.type || "").startsWith("image/") || /\.(jpe?g|png)$/i.test(file.name || "");
   const isPdf = isProjectPdfFile(file);
-  const showImage = isImage && Boolean(file.dataUrl);
-  const showPdf = isPdf && Boolean(file.dataUrl);
+  const source = await projectFileSource(file);
+  const showImage = isImage && Boolean(source);
+  const showPdf = isPdf && Boolean(source);
   projectFileViewerImage.classList.toggle("hidden", !showImage);
   projectFileViewerFrame.classList.toggle("hidden", !showPdf);
   projectFileGenericPreview.classList.toggle("hidden", showImage || showPdf);
-  projectFileViewerImage.src = showImage ? file.dataUrl : "";
-  projectFileViewerFrame.src = showPdf ? file.dataUrl : "about:blank";
+  projectFileViewerImage.src = showImage ? source : "";
+  projectFileViewerFrame.src = showPdf ? source : "about:blank";
   projectFileGenericPreview.innerHTML = !showImage && !showPdf
-    ? `<strong>${escapeHtml(fileExtension(file.name))}</strong><p>${file.dataUrl ? "文件已保存，可下载后在对应软件中查看。" : "历史文件未保存实体内容，请重新上传。"}</p>`
+    ? `<strong>${escapeHtml(fileExtension(file.name))}</strong><p>${source ? "文件已保存，可下载后在对应软件中查看。" : "历史文件未保存实体内容，请重新上传。"}</p>`
     : "";
   projectFileViewerName.textContent = file.name || "项目文件";
   projectFileViewerPalette.innerHTML = "";
   projectFileViewerPalette.classList.add("hidden");
   projectFileViewerPaletteText.textContent = `${escapeHtml(fileExtension(file.name))} · ${file.size ? `${Math.max(0.01, file.size / 1024 / 1024).toFixed(2)} MB` : "文件预览"}`;
   projectFileViewerNote.textContent = project?.note || "暂无设计备注";
-  projectFileViewerDownload.disabled = !file.dataUrl;
+  projectFileViewerDownload.disabled = !source;
   resetProjectFileTransform();
 }
 
@@ -7373,7 +7879,7 @@ function renderProjectFileManager() {
   const project = activeProject();
   if (!projectFileManagerGrid || !project) return;
   const files = projectFileEntries(project);
-  projectFileManagerGrid.innerHTML = files.length
+  if (projectFileManagerGrid) projectFileManagerGrid.innerHTML = files.length
     ? files.map((file, index) => projectFileTileHtml(file, index, "manager")).join("")
     : `<p class="project-empty-file">无文件</p>`;
 }
@@ -7382,14 +7888,14 @@ function openProjectFileManager() {
   const project = activeProject();
   if (!project) return;
   renderProjectFileManager();
-  projectFileManager.classList.add("active");
-  projectFileManager.setAttribute("aria-hidden", "false");
+  projectFileManager?.classList.add("active");
+  projectFileManager?.setAttribute("aria-hidden", "false");
   lockBodyScroll(true);
 }
 
 function closeProjectFileManager() {
-  projectFileManager.classList.remove("active");
-  projectFileManager.setAttribute("aria-hidden", "true");
+  projectFileManager?.classList.remove("active");
+  projectFileManager?.setAttribute("aria-hidden", "true");
   projectManagerDragEntryId = "";
   lockBodyScroll(false);
 }
@@ -7424,20 +7930,26 @@ async function attachProjectDetailFiles(fileList) {
   const project = activeProject();
   const existingCount = (project?.files || []).length + (project?.uploads || []).length;
   const availableSlots = Math.max(0, MAX_UPLOAD_FILES - existingCount);
-  const incomingFiles = [...(fileList || [])];
+  const incomingFiles = acceptedUploadFiles(fileList, {
+    label: "项目文件",
+    maxBytes: MAX_RESOURCE_FILE_BYTES,
+  });
   const files = incomingFiles.slice(0, availableSlots);
   if (incomingFiles.length > files.length) showToast("超过最大上传数量", "warning");
   if (!project || !files.length || !projectParticipantCanUpload(project)) return;
   const uploadedAt = formatDateTime();
   const uploads = [];
   for (const file of files) {
+    const key = `project_upload_${project.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    await saveImageToDB(key, file);
     uploads.push({
       name: file.name,
       type: file.type || "",
       size: file.size || 0,
       uploader: currentAccount.name,
       time: uploadedAt,
-      dataUrl: await readFileAsDataURL(file),
+      key,
+      dataUrl: "",
     });
   }
   project.uploads = [...uploads, ...(project.uploads || [])];
@@ -7557,17 +8069,14 @@ function renderPaletteUploadFiles() {
 
 function renderProjectResults(keyword) {
   const query = keyword.trim().toLowerCase();
+  syncProjectLibrary();
   const results = projectLibrary.filter((item) => {
     const indexText = `${item.name} ${item.status} ${item.members}`.toLowerCase();
     return !query || indexText.includes(query);
   });
-
-  if (!results.length) {
-    projectResults.innerHTML = `<p class="empty-state">没有匹配的项目。</p>`;
-    return;
-  }
-
-  projectResults.innerHTML = results
+  const exactMatch = projectLibrary.some((item) => item.name.trim().toLowerCase() === query);
+  const resultMarkup = results.length
+    ? results
     .map((item) => {
       const active = selectedProjects.some((project) => project.name === item.name) ? "active" : "";
       return `<button class="project-option ${active}" type="button" data-project="${item.name}">
@@ -7578,19 +8087,40 @@ function renderProjectResults(keyword) {
         <i>${active ? "✓" : "+"}</i>
       </button>`;
     })
-    .join("");
+    .join("")
+    : `<p class="empty-state">没有匹配的项目。</p>`;
+  const createMarkup = exactMatch
+    ? ""
+    : `<button class="project-create-option" type="button" data-create-linked-project="${escapeHtml(keyword.trim())}">
+        <span>＋</span><strong>${keyword.trim() ? `新建项目“${escapeHtml(keyword.trim())}”` : "新建项目"}</strong>
+      </button>`;
+  projectResults.innerHTML = resultMarkup + createMarkup;
 }
 
 function updatePainterPickerCount() {
   painterSelectedCount.textContent = `已选 ${draftPainterSelection.length} 幅`;
 }
 
+function painterPickerImageMarkup(item) {
+  if (item.imageData) {
+    return `<img src="${escapeHtml(item.imageData)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`;
+  }
+  return item.imageKey
+    ? `<img data-image-key="${escapeHtml(item.imageKey)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`
+    : "";
+}
+
 function renderPainterPicker() {
   const query = painterPickerSearch.value.trim().toLowerCase();
-  const painter = painterFilter.value;
-  const results = painterLibrary.filter((item) => {
+  const catalog = painterWorkCatalog();
+  const painterNames = [...new Set(catalog.map((item) => item.painter))];
+  const previousPainter = painterFilter.value;
+  painterFilter.innerHTML = `<option value="all">全部手绘师</option>${painterNames.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")}`;
+  painterFilter.value = painterNames.includes(previousPainter) ? previousPainter : "all";
+  const activePainter = painterFilter.value;
+  const results = catalog.filter((item) => {
     const indexText = `${item.file} ${item.painter} ${item.project} ${item.tags.join(" ")}`.toLowerCase();
-    const painterMatch = painter === "all" || item.painter === painter;
+    const painterMatch = activePainter === "all" || item.painter === activePainter;
     return painterMatch && (!query || indexText.includes(query));
   });
 
@@ -7607,13 +8137,14 @@ function renderPainterPicker() {
     .map((item) => {
       const active = draftPainterSelection.some((selected) => selected.file === item.file) ? "active" : "";
       return `<button class="upload-thumb-card painter-pick-card ${active}" type="button" data-file="${item.file}">
-        <span class="painter-pick-thumb pattern ${item.pattern}"></span>
+        <span class="painter-pick-thumb${item.pattern ? ` pattern ${item.pattern}` : ""}" data-image-shell>${painterPickerImageMarkup(item)}</span>
         <div class="painter-pick-copy"><strong>${item.file}</strong>
         <span>${item.painter} / ${item.project}</span>
-        <span class="painter-pick-tags">${item.tags.join("、")}</span></div>
+        <span class="painter-pick-tags">${item.tags.join("、") || "未设置标签"} · ${escapeHtml(item.reviewStatus)}</span></div>
       </button>`;
     })
     .join("");
+  hydrateLazyKeyImages(painterPickerGrid);
   updatePainterPickerCount();
 }
 
@@ -7641,10 +8172,11 @@ function updateLinkedPainterSummary() {
   }
   linkedPainterSummary.textContent = `已关联 ${selectedPainterWorks.length} 幅`;
   linkedPainterList.innerHTML = selectedPainterWorks.map((item) => `<article class="linked-selection-item">
-    <span class="painter-pick-thumb pattern ${item.pattern}"></span>
+    <span class="painter-pick-thumb${item.pattern ? ` pattern ${item.pattern}` : ""}" data-image-shell>${painterPickerImageMarkup(item)}</span>
     <div><strong>${escapeHtml(item.file)}</strong><small>${escapeHtml(item.painter)} · ${escapeHtml(item.title)}</small></div>
     <button type="button" data-remove-painter="${escapeHtml(item.file)}" aria-label="移除 ${escapeHtml(item.file)}">×</button>
   </article>`).join("");
+  hydrateLazyKeyImages(linkedPainterList);
 }
 
 function renderLinkedProjects() {
@@ -7755,6 +8287,7 @@ function updateCardReviewStatus(card, value) {
     badge.className = `sale-badge ${statusBadgeClass(value)}`;
   }
   card.classList.toggle("needs-revision", value.includes("需修改") || value.includes("未修改"));
+  syncPersonalReviewStatus(card);
 }
 
 function setWorkSleeping(card, sleeping) {
@@ -7833,11 +8366,10 @@ function renderSleepList() {
 
   sleepList.innerHTML = items
     .map((card) => {
-      const trigger = card.querySelector(".preview-trigger");
       const colorCount = Number(card.dataset.colors || 1);
       const note = card.dataset.reviewNote || "暂无备注";
       const owner = `${card.dataset.workRole || "设计师"}：${workOwnerName(card)}`;
-      const patternClass = trigger?.className.replace("preview-trigger", "").trim() || "pattern pattern-a";
+      const patternClass = card.dataset.imageData ? "has-image" : "";
       const imageStyle = card.dataset.imageData ? ` style="background-image:url('${card.dataset.imageData}')"` : "";
       return `<article class="sleep-item" data-file="${card.dataset.file}">
         <button class="sleep-thumb ${patternClass}" type="button"${imageStyle}>${colorCount > 1 ? `<span class="color-count">${colorCount}</span>` : ""}</button>
@@ -7947,9 +8479,8 @@ function renderRecycleBin() {
   recycleList.innerHTML = items
     .map(({ card }) => {
       const deletedAt = new Date(card.dataset.deletedAt).toLocaleString("zh-CN", { hour12: false });
-      const trigger = card.querySelector(".preview-trigger");
       const colorCount = Number(card.dataset.colors || 1);
-      const patternClass = trigger?.className.replace("preview-trigger", "").trim() || "pattern pattern-a";
+      const patternClass = card.dataset.imageData ? "has-image" : "";
       const imageStyle = card.dataset.imageData ? ` style="background-image:url('${card.dataset.imageData}')"` : "";
       return `<article class="recycle-item" data-file="${card.dataset.file}">
         <button class="recycle-thumb ${patternClass}" type="button"${imageStyle}>${colorCount > 1 ? `<span class="color-count">${colorCount}</span>` : ""}</button>
@@ -8008,6 +8539,12 @@ function restoreRememberedLogins() {
 }
 
 function switchLoginPortal(portal) {
+  if (window.KingLoginPortal) {
+    window.KingLoginPortal.show(portal);
+    loginError.textContent = "";
+    clientLoginError.textContent = "";
+    return;
+  }
   const clientMode = portal === "client";
   employeeLoginPanel.classList.toggle("hidden", clientMode);
   clientLoginPanel.classList.toggle("hidden", !clientMode);
@@ -8016,26 +8553,87 @@ function switchLoginPortal(portal) {
   (clientMode ? clientUsername : usernameInput).focus();
 }
 
-function applyLogin(accountKey, account) {
-  currentAccount = { ...account };
-  localStorage.setItem(SESSION_KEY, accountKey);
-  localStorage.setItem(SESSION_ACCOUNT_DATA_KEY, JSON.stringify({ accountKey, account }));
-  roleSelect.value = account.role;
-  roleSelect.disabled = true;
-  applyProfilePrefs(currentAccount);
-  updateRoleDashboard(account.role);
-  configureRoleNavigation(account.role);
-  renderNotifications();
-  // 客户端只进"我的花型库"
-  if (account.role === "客户") {
-    switchView("myLibrary");
-    renderMyPatternLibrary();
-  } else {
-    switchView("dashboard");
+function showAppLoading(message = "正在加载…") {
+  if (!appLoadingOverlay) return;
+  if (appLoadingText) appLoadingText.textContent = message;
+  appLoadingOverlay.classList.remove("hidden");
+  appLoadingOverlay.setAttribute("aria-hidden", "false");
+}
+
+function hideAppLoading() {
+  if (!appLoadingOverlay) return;
+  appLoadingOverlay.classList.add("hidden");
+  appLoadingOverlay.setAttribute("aria-hidden", "true");
+}
+
+function waitForUiPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+async function runWithAppLoading(message, task, minimumMs = 360) {
+  const startedAt = Date.now();
+  showAppLoading(message);
+  await waitForUiPaint();
+  try {
+    return await task();
+  } finally {
+    const remaining = minimumMs - (Date.now() - startedAt);
+    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+    hideAppLoading();
   }
-  loginScreen.classList.add("hidden");
-  appShell.classList.remove("locked");
-  loginError.textContent = "";
+}
+
+let loginInProgress = false;
+function applyLogin(accountKey, account) {
+  if (loginInProgress) return;
+  loginInProgress = true;
+  const loginPortal = account.role === "客户" ? "client" : "employee";
+  window.KingLoginPortal?.setSubmitting(loginPortal, true);
+  const loginLoadingStartedAt = Date.now();
+  showAppLoading(account.role === "客户" ? "正在进入客户端…" : "正在进入总控台…");
+  // 先让遮罩真正绘制一帧，再进行页面切换和数据渲染，避免点击后像“没有反应”。
+  waitForUiPaint().then(() => {
+    currentAccount = { ...account };
+    localStorage.setItem(SESSION_KEY, accountKey);
+    localStorage.setItem(SESSION_ACCOUNT_DATA_KEY, JSON.stringify({ accountKey, account }));
+    roleSelect.value = account.role;
+    roleSelect.disabled = true;
+    applyProfilePrefs(currentAccount);
+    updateRoleDashboard(account.role);
+    configureRoleNavigation(account.role);
+    renderNotifications();
+    if (globalSearchInput) {
+      const clientMode = account.role === "客户";
+      globalSearchInput.value = "";
+      globalSearchInput.placeholder = clientMode ? "搜索我的花型编号或名称" : "搜索编号 / 项目 / 客户 / 设计师 / 手绘师（支持拼音）";
+      globalSearchInput.setAttribute("aria-label", clientMode ? "搜索我的花型库" : "全局搜索，支持拼音");
+    }
+    globalSearchMatches = [];
+    if (globalSearchResults) {
+      globalSearchResults.innerHTML = "";
+      globalSearchResults.classList.add("hidden");
+    }
+    // 客户端只进“我的花型库”
+    if (account.role === "客户") {
+      switchView("myLibrary");
+    } else {
+      switchView("dashboard");
+    }
+    loginScreen.classList.add("hidden");
+    appShell.classList.remove("locked");
+    loginError.textContent = "";
+    const ready = account.role === "客户"
+      ? initialImageHydration
+      : Promise.all([initialImageHydration, ensureCaseLibraryReady()]);
+    ready.finally(() => {
+      const remaining = Math.max(0, 560 - (Date.now() - loginLoadingStartedAt));
+      setTimeout(() => requestAnimationFrame(() => {
+        hideAppLoading();
+        window.KingLoginPortal?.setSubmitting(loginPortal, false);
+        loginInProgress = false;
+      }), remaining);
+    });
+  });
 }
 
 /* ----- Toast notification system ----- */
@@ -8340,7 +8938,7 @@ accountApplicationForm.addEventListener("submit", (event) => {
   const contact = applicationContact.value.trim().toLowerCase();
   const password = applicationPassword.value;
   const role = applicationRole.value;
-  const allowedRoles = ["设计师", "手绘师", "打样师", "销售"];
+  const allowedRoles = ["设计师", "手绘师", "销售"];
 
   if (!/^[a-z0-9][a-z0-9._-]{2,23}$/.test(username)) {
     applicationError.textContent = "登录账号需为 3–24 位英文、数字、点、下划线或短横线。";
@@ -8408,9 +9006,6 @@ passwordRecoveryForm.addEventListener("submit", (event) => {
   passwordInput.value = "";
   loginError.textContent = "密码已重置，请使用新密码登录。";
 });
-
-openClientLogin?.addEventListener("click", () => switchLoginPortal("client"));
-openEmployeeLogin?.addEventListener("click", () => switchLoginPortal("employee"));
 
 loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -8663,16 +9258,26 @@ document.addEventListener(
 toggleCardInfo?.addEventListener("click", () => {
   cardInfoHidden = !cardInfoHidden;
   worksBoard.classList.toggle("cards-info-hidden", cardInfoHidden);
-  toggleCardInfo.textContent = cardInfoHidden ? "显示卡片信息" : "隐藏卡片信息";
+  if (toggleCardInfo) toggleCardInfo.textContent = cardInfoHidden ? "显示卡片信息" : "隐藏卡片信息";
 });
-workSort.addEventListener("change", sortWorkCards);
-workTimeFilter.addEventListener("change", sortWorkCards);
+workSort.addEventListener("change", () => {
+  workRenderLimit = WORK_RENDER_BATCH;
+  sortWorkCards();
+});
+workTimeFilter.addEventListener("change", () => {
+  workRenderLimit = WORK_RENDER_BATCH;
+  sortWorkCards();
+});
+function resetReviewBatch() {
+  reviewRenderLimit = REVIEW_RENDER_BATCH;
+}
 function shiftReviewDate(days) {
   const date = new Date(`${activeReviewDate}T12:00:00`);
   date.setDate(date.getDate() + days);
   const next = dateKey(date);
   const today = dateKey(new Date());
   activeReviewDate = next > today ? today : next;
+  resetReviewBatch();
   renderDailyReviewBoard();
 }
 
@@ -8681,12 +9286,14 @@ reviewNextDay.addEventListener("click", () => shiftReviewDate(1));
 reviewDateInput.addEventListener("change", () => {
   if (!reviewDateInput.value) return;
   activeReviewDate = reviewDateInput.value;
+  resetReviewBatch();
   renderDailyReviewBoard();
 });
 reviewWorkTypeSwitch?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-review-worktype]");
   if (!button || button.dataset.reviewWorktype === activeReviewWorkType) return;
   activeReviewWorkType = button.dataset.reviewWorktype;
+  resetReviewBatch();
   renderDailyReviewBoard();
 });
 reviewStatusTabs.addEventListener("click", (event) => {
@@ -8696,6 +9303,7 @@ reviewStatusTabs.addEventListener("click", (event) => {
     activeReviewFilter = group.dataset.reviewFilterGroup;
     activeReviewResultFilter = result.dataset.reviewResult;
     reviewStatusTabs.querySelectorAll(".review-tab-menu").forEach((menu) => menu.classList.add("hidden"));
+    resetReviewBatch();
     renderDailyReviewBoard();
     return;
   }
@@ -8705,6 +9313,7 @@ reviewStatusTabs.addEventListener("click", (event) => {
     const menu = group.querySelector(".review-tab-menu");
     const willOpen = menu.classList.contains("hidden");
     activeReviewFilter = group.dataset.reviewFilterGroup;
+    resetReviewBatch();
     renderDailyReviewBoard();
     reviewStatusTabs.querySelectorAll(".review-tab-menu").forEach((item) => item.classList.add("hidden"));
     if (willOpen) menu.classList.remove("hidden");
@@ -8715,6 +9324,7 @@ reviewStatusTabs.addEventListener("click", (event) => {
   activeReviewFilter = button.dataset.reviewFilter;
   activeReviewResultFilter = "all";
   reviewStatusTabs.querySelectorAll(".review-tab-menu").forEach((menu) => menu.classList.add("hidden"));
+  resetReviewBatch();
   renderDailyReviewBoard();
 });
 startLibrarySession.addEventListener("click", () => {
@@ -8851,19 +9461,6 @@ projectLifecycleConfirm?.addEventListener("click", () => {
 projectLifecycleModal?.addEventListener("click", (event) => {
   if (event.target === projectLifecycleModal) closeProjectLifecycleModal();
 });
-projectLifecycleBody?.addEventListener("change", (event) => {
-  if (event.target.matches('[name="deliveryFiles"]')) {
-    const additions = [...(event.target.files || [])];
-    const bySignature = new Map(pendingProjectLifecycleFiles.map((file) => [`${file.name}-${file.size || 0}`, file]));
-    additions.forEach((file) => bySignature.set(`${file.name}-${file.size || 0}`, file));
-    pendingProjectLifecycleFiles = [...bySignature.values()].slice(0, 50);
-    const current = projectLifecycleBody.querySelector(".project-delivery-file-list, .project-delivery-empty");
-    current?.insertAdjacentHTML("afterend", deliveryFilesSummary(pendingProjectLifecycleFiles));
-    current?.remove();
-    event.target.value = "";
-  }
-  updateDeliveryConfirmationState();
-});
 projectClose?.addEventListener("click", requestCloseProjectCreateModal);
 projectCancel?.addEventListener("click", requestCloseProjectCreateModal);
 chooseProjectFiles?.addEventListener("click", () => projectFilesInput.click());
@@ -8995,14 +9592,6 @@ projectModal?.addEventListener("click", (event) => {
 });
 // ===== 客户中心交互 =====
 document.querySelector("#openCustomerCreate")?.addEventListener("click", () => openCustomerModal());
-document.querySelector("#customerListFilter")?.addEventListener("click", (event) => {
-  const btn = event.target.closest("[data-cc-filter]");
-  if (!btn) return;
-  customerCenterFilter = btn.dataset.ccFilter;
-  customerCenterPage = 1;
-  openCustomerMenuId = null;
-  renderCustomerList();
-});
 document.querySelector("#customerListBody")?.addEventListener("click", (event) => {
   // ⋯ 菜单开关
   const menuBtn = event.target.closest("[data-customer-menu]");
@@ -9010,18 +9599,6 @@ document.querySelector("#customerListBody")?.addEventListener("click", (event) =
     event.stopPropagation();
     openCustomerMenuId = openCustomerMenuId === menuBtn.dataset.customerMenu ? null : menuBtn.dataset.customerMenu;
     renderCustomerList();
-    return;
-  }
-  // 更改合作状态
-  const statusBtn = event.target.closest("[data-cc-set-status]");
-  if (statusBtn) {
-    event.stopPropagation();
-    const client = customerCenterClients.find((c) => c.id === statusBtn.dataset.ccStatusId);
-    if (client) client.status = statusBtn.dataset.ccSetStatus;
-    openCustomerMenuId = null;
-    renderCustomerList();
-    if (document.querySelector("#customerDrawer")?.classList.contains("active")) renderCustomerDetail();
-    showToast("合作状态已更新。", "success");
     return;
   }
   // 删除客户
@@ -9424,14 +10001,14 @@ projectFileManagerGrid?.addEventListener("dragend", (event) => {
 });
 projectFileManagerDropzone?.addEventListener("dragover", (event) => {
   event.preventDefault();
-  projectFileManagerDropzone.classList.add("drag-active");
+  projectFileManagerDropzone?.classList.add("drag-active");
 });
 projectFileManagerDropzone?.addEventListener("dragleave", (event) => {
-  if (!projectFileManagerDropzone.contains(event.relatedTarget)) projectFileManagerDropzone.classList.remove("drag-active");
+  if (!projectFileManagerDropzone?.contains(event.relatedTarget)) projectFileManagerDropzone?.classList.remove("drag-active");
 });
 projectFileManagerDropzone?.addEventListener("drop", async (event) => {
   event.preventDefault();
-  projectFileManagerDropzone.classList.remove("drag-active");
+  projectFileManagerDropzone?.classList.remove("drag-active");
   if (!event.dataTransfer?.files?.length) return;
   await attachProjectDetailFiles(event.dataTransfer.files);
   renderProjectFileManager();
@@ -9634,45 +10211,13 @@ orderStatusFilter.addEventListener("change", renderOrderCenter);
   el?.addEventListener("input", renderOrderCenter);
   el?.addEventListener("keydown", (e) => { if (e.key === "Enter") renderOrderCenter(); });
 });
-document.querySelector("#orderSearchBtn")?.addEventListener("click", renderOrderCenter);
 orderList.addEventListener("click", (event) => {
   // 价格：点击修改（管理员/销售）
   const priceBtn = event.target.closest("[data-order-price]");
-  if (priceBtn) { editOrderPrice(priceBtn.dataset.orderPrice); return; }
-  // ⋯ 更多操作菜单：开关
-  const menuBtn = event.target.closest("[data-order-menu]");
-  if (menuBtn) {
-    const pop = orderList.querySelector(`[data-order-menu-pop="${CSS.escape(menuBtn.dataset.orderMenu)}"]`);
-    const willOpen = pop && pop.classList.contains("hidden");
-    orderList.querySelectorAll(".order-menu-pop").forEach((el) => el.classList.add("hidden"));
-    if (willOpen) pop.classList.remove("hidden");
-    return;
-  }
-  // 菜单项：查看详情（打开订单生命周期详情页）
-  const detailBtn = event.target.closest("[data-order-detail]");
-  if (detailBtn) {
-    openOrderDetail(detailBtn.dataset.orderDetail);
-    return;
-  }
-  // 菜单项：上传协议
-  const uploadAgrBtn = event.target.closest("[data-order-upload-agreement]");
-  if (uploadAgrBtn) {
-    const order = studioOrders.find((o) => o.id === uploadAgrBtn.dataset.orderUploadAgreement);
-    if (order) openDeliveryAgreementModal(order, false);
-    return;
-  }
-  // 菜单项：关闭订单
-  const closeMenuBtn = event.target.closest("[data-order-close]");
-  if (closeMenuBtn) { closeOrder(closeMenuBtn.dataset.orderClose); return; }
-  // 菜单项：删除订单
+  if (priceBtn) { editOrderPrice(priceBtn.dataset.orderPrice, priceBtn); return; }
   const deleteBtn = event.target.closest("[data-order-delete]");
   if (deleteBtn) { deleteStudioOrder(deleteBtn.dataset.orderDelete); return; }
 
-  const expandBtn = event.target.closest("[data-order-expand]");
-  if (expandBtn) {
-    openOrderDetail(expandBtn.dataset.orderExpand);
-    return;
-  }
   const deliverBtn = event.target.closest("[data-order-toggle-deliver]");
   if (deliverBtn) {
     const order = studioOrders.find((o) => o.id === deliverBtn.dataset.orderToggleDeliver);
@@ -9686,12 +10231,6 @@ orderList.addEventListener("click", (event) => {
       renderOrderCenter();
       showToast(`订单 ${order.id} 已标记为${order.deliverStatus}。`, "success");
     }
-    return;
-  }
-  const flower = event.target.closest(".order-flower");
-  if (flower) {
-    const card = sourceCardByFile(flower.getAttribute("title"));
-    if (card) openLightbox(card);
     return;
   }
   const closeButton = event.target.closest("[data-close-order]");
@@ -9709,6 +10248,11 @@ orderList.addEventListener("click", (event) => {
     addOrderTag(addTagButton.dataset.orderAddTag);
     return;
   }
+  const row = event.target.closest("[data-order-row]");
+  if (row && !event.target.closest("button, input, select, textarea, a, label")) {
+    openOrderDetail(row.dataset.orderRow);
+    return;
+  }
   const fileButton = event.target.closest("[data-order-file]");
   if (!fileButton) return;
   const card = sourceCardByFile(fileButton.dataset.orderFile);
@@ -9716,11 +10260,6 @@ orderList.addEventListener("click", (event) => {
     activeOrderFileContext = { orderId: fileButton.dataset.orderId, file: fileButton.dataset.orderFile };
     openLightbox(card);
   }
-});
-// 点击空白处关闭 ⋯ 菜单
-document.addEventListener("click", (event) => {
-  if (event.target.closest("[data-order-menu]") || event.target.closest(".order-menu-pop")) return;
-  orderList.querySelectorAll(".order-menu-pop:not(.hidden)").forEach((el) => el.classList.add("hidden"));
 });
 orderList.addEventListener("change", (event) => {
   const input = event.target.closest("[data-order-date]");
@@ -9848,7 +10387,11 @@ chooseSourceFile.addEventListener("click", () => artworkSourceFile.click());
 choosePaletteFiles.addEventListener("click", () => artworkPaletteFiles.click());
 artworkPaletteFiles.addEventListener("change", () => {
   const incomingFiles = [...(artworkPaletteFiles.files || [])];
-  const supportedFiles = incomingFiles.filter(isSupportedPaletteFile);
+  const supportedFiles = acceptedUploadFiles(incomingFiles.filter(isSupportedPaletteFile), {
+    label: "配色",
+    maxBytes: MAX_IMAGE_FILE_BYTES,
+    extensions: ["jpg", "jpeg", "png", "psd", "tif", "tiff"],
+  });
   if (supportedFiles.length !== incomingFiles.length) showToast("配色仅支持 JPEG、JPG、PNG、PSD、TIFF 文件。", "warning");
   const mergedFiles = mergeUniqueFiles(selectedPaletteFiles, supportedFiles);
   if (mergedFiles.length > MAX_UPLOAD_FILES) showToast("超过最大上传数量", "warning");
@@ -9863,7 +10406,11 @@ paletteUploadReadout.addEventListener("click", (event) => {
   renderPaletteUploadFiles();
 });
 artworkSourceFile.addEventListener("change", () => {
-  const incomingFiles = [...(artworkSourceFile.files || [])];
+  const incomingFiles = acceptedUploadFiles(artworkSourceFile.files, {
+    label: "源文件",
+    maxBytes: MAX_SOURCE_FILE_BYTES,
+    extensions: ["ps", "psd", "ai", "tif", "tiff", "jpg", "jpeg", "png"],
+  });
   const mergedFiles = mergeUniqueFiles(selectedSourceFiles, incomingFiles);
   if (mergedFiles.length > MAX_UPLOAD_FILES) showToast("超过最大上传数量", "warning");
   selectedSourceFiles = mergedFiles.slice(0, MAX_UPLOAD_FILES);
@@ -9882,7 +10429,11 @@ fileReadout.addEventListener("click", (event) => {
 artworkFiles.addEventListener("change", () => {
   if (!artworkFiles.files.length) return;
   clearUploadValidation();
-  const incomingFiles = [...artworkFiles.files];
+  const incomingFiles = acceptedUploadFiles(artworkFiles.files, {
+    label: "作品图片",
+    maxBytes: MAX_IMAGE_FILE_BYTES,
+    imageOnly: true,
+  });
   incomingFiles.forEach((file) => {
     if (!uploadFileNames.has(fileIdentity(file))) uploadFileNames.set(fileIdentity(file), file.name);
   });
@@ -9896,7 +10447,11 @@ chooseReferenceFiles.addEventListener("click", () => referenceFiles.click());
 referenceFiles.addEventListener("change", () => {
   if (!referenceFiles.files.length) return;
   clearUploadValidation();
-  const incomingFiles = [...referenceFiles.files];
+  const incomingFiles = acceptedUploadFiles(referenceFiles.files, {
+    label: "参考图",
+    maxBytes: MAX_IMAGE_FILE_BYTES,
+    imageOnly: true,
+  });
   incomingFiles.forEach((file) => {
     if (!referenceFileNames.has(fileIdentity(file))) referenceFileNames.set(fileIdentity(file), file.name);
   });
@@ -9963,7 +10518,7 @@ painterFilter.addEventListener("change", renderPainterPicker);
 painterSelectAll.addEventListener("click", () => {
   const query = painterPickerSearch.value.trim().toLowerCase();
   const painter = painterFilter.value;
-  const visibleItems = painterLibrary.filter((item) => {
+  const visibleItems = painterWorkCatalog().filter((item) => {
     const indexText = `${item.file} ${item.painter} ${item.project} ${item.tags.join(" ")}`.toLowerCase();
     return (painter === "all" || item.painter === painter) && (!query || indexText.includes(query));
   });
@@ -9981,7 +10536,7 @@ painterPickerSearch.addEventListener("input", () => {
 painterPickerGrid.addEventListener("click", (event) => {
   const card = event.target.closest(".painter-pick-card");
   if (!card) return;
-  const item = painterLibrary.find((entry) => entry.file === card.dataset.file);
+  const item = painterWorkCatalog().find((entry) => entry.file === card.dataset.file);
   if (!item) return;
   const alreadySelected = draftPainterSelection.some((entry) => entry.file === item.file);
   draftPainterSelection = alreadySelected
@@ -9996,6 +10551,51 @@ projectSearch.addEventListener("input", () => {
   projectSearchTimer = setTimeout(() => renderProjectResults(projectSearch.value), 200);
 });
 projectResults.addEventListener("click", (event) => {
+  const createButton = event.target.closest("[data-create-linked-project]");
+  if (createButton) {
+    const name = createButton.dataset.createLinkedProject.trim();
+    if (!name) {
+      projectSearch.placeholder = "先输入新项目名称";
+      projectSearch.focus();
+      return;
+    }
+    const now = formatDateTime();
+    const project = {
+      id: `PJ-${Date.now()}`,
+      name,
+      customer: "非客户项目",
+      type: "内部",
+      status: "需求确认",
+      stage: "需求确认",
+      projectStatus: "normal",
+      files: [],
+      designers: currentAccount.role === "设计师" ? [currentAccount.name] : [],
+      painters: currentAccount.role === "手绘师" ? [currentAccount.name] : [],
+      owners: currentAccount.name ? [currentAccount.name] : [],
+      owner: currentAccount.name || "待分配",
+      members: currentAccount.name || "待分配",
+      startAt: "",
+      endAt: "",
+      note: "",
+      logs: [],
+      createdAt: now,
+      createdBy: currentAccountDisplayName() || currentAccount.name || "",
+      uploads: [],
+      deliveryStatus: "pending",
+      deliveryFiles: [],
+    };
+    normalizeProjectLifecycleProject(project);
+    customProjects.unshift(project);
+    syncProjectLibrary();
+    const created = projectLibrary.find((item) => item.name === name);
+    if (created) selectedProjects.push(created);
+    projectSearch.value = "";
+    saveStudioState();
+    renderLinkedProjects();
+    renderProjectResults("");
+    showToast(`项目“${name}”已新建并关联。`, "success");
+    return;
+  }
   const option = event.target.closest(".project-option");
   if (!option) return;
   const project = projectLibrary.find((item) => item.name === option.dataset.project);
@@ -10063,7 +10663,7 @@ addTagButton?.addEventListener("click", () => {
   if (canSelect && !selectedUploadTags.includes(tag)) {
     selectedUploadTags.push(tag);
   }
-  newTagInput.value = "";
+  if (newTagInput) newTagInput.value = "";
   renderUploadTags();
   saveStudioState();
   showToast(canSelect ? "新标签已提交审批，并用于本次作品；审批前不会进入公共标签库。" : "新标签已提交审批；当前已选满 6 个标签。", canSelect ? "success" : "warning");
@@ -10137,33 +10737,32 @@ uploadConfirm.addEventListener("click", async () => {
       ? `-${Date.now().toString().slice(-4)}`
       : "";
     const fileId = `${baseName}${suffix}`;
-    const imageData = await readFileAsDataURL(firstFile);
-    await saveImageToDB(fileId, imageData);
-    const paletteKeys = [fileId];
-    const paletteFileEntries = [{ name: firstFile.name, key: fileId, type: firstFile.type || "image/jpeg", primary: true }];
+    const mainTiers = await persistArtworkImageTiers(fileId, firstFile);
+    const imageData = await resolveImageSource(mainTiers.thumbKey);
+    const paletteKeys = [mainTiers.previewKey];
+    const paletteThumbKeys = [mainTiers.thumbKey];
+    const paletteFileEntries = [{ name: firstFile.name, key: mainTiers.originalKey, type: firstFile.type || "image/jpeg", primary: true }];
     for (let paletteIndex = 0; paletteIndex < selectedPaletteFiles.length; paletteIndex += 1) {
       const paletteFile = selectedPaletteFiles[paletteIndex];
-      const paletteData = await readFileAsDataURL(paletteFile);
-      const paletteKey = `${fileId}__color_${paletteIndex + 2}_${Date.now()}`;
-      await saveImageToDB(paletteKey, paletteData);
-      paletteKeys.push(paletteKey);
-      paletteFileEntries.push({ name: paletteFile.name, key: paletteKey, type: paletteFile.type || "application/octet-stream", primary: false });
+      const paletteBaseKey = `${fileId}__color_${paletteIndex + 2}_${Date.now()}`;
+      const paletteTiers = await persistArtworkImageTiers(paletteBaseKey, paletteFile);
+      paletteKeys.push(paletteTiers.previewKey);
+      paletteThumbKeys.push(paletteTiers.thumbKey);
+      paletteFileEntries.push({ name: paletteFile.name, key: paletteTiers.originalKey, type: paletteFile.type || "application/octet-stream", primary: false });
     }
     const referenceKeys = [];
     for (let refIndex = 0; refIndex < selectedReferenceFiles.length; refIndex += 1) {
       const referenceFile = selectedReferenceFiles[refIndex];
       if (!referenceFile.type.startsWith("image/")) continue;
-      const referenceData = await readFileAsDataURL(referenceFile);
       const referenceKey = `${fileId}__reference_${refIndex + 1}_${Date.now()}`;
-      await saveImageToDB(referenceKey, referenceData);
+      await saveImageToDB(referenceKey, referenceFile);
       referenceKeys.push(referenceKey);
     }
     const storedSourceFiles = [];
     for (let sourceIndex = 0; sourceIndex < selectedSourceFiles.length; sourceIndex += 1) {
       const sourceFile = selectedSourceFiles[sourceIndex];
-      const sourceData = await readFileAsDataURL(sourceFile);
       const sourceKey = `${fileId}__source_${sourceIndex + 1}_${Date.now()}`;
-      await saveImageToDB(sourceKey, sourceData);
+      await saveImageToDB(sourceKey, sourceFile);
       storedSourceFiles.push({ name: sourceFile.name, key: sourceKey, type: sourceFile.type || "application/octet-stream" });
     }
     const card = createWorkCard({
@@ -10174,8 +10773,9 @@ uploadConfirm.addEventListener("click", async () => {
       version: nowText,
       colors: paletteKeys.length,
       tags: selectedUploadTags.join(","),
-      imageKey: fileId,
+      imageKey: mainTiers.thumbKey,
       paletteKeys: JSON.stringify(paletteKeys),
+      paletteThumbKeys: JSON.stringify(paletteThumbKeys),
       paletteFiles: JSON.stringify(paletteFileEntries),
       imageData,
       title: baseName,
@@ -10216,8 +10816,11 @@ let replaceTargetCard = null;
 const replaceImageInput = document.querySelector("#replaceImageInput");
 replaceImageInput.addEventListener("change", async () => {
   if (!replaceTargetCard || !replaceImageInput.files.length) return;
-  const files = [...replaceImageInput.files]
-    .filter((file) => file.type.startsWith("image/"))
+  const files = acceptedUploadFiles(replaceImageInput.files, {
+    label: "作品图片",
+    maxBytes: MAX_IMAGE_FILE_BYTES,
+    imageOnly: true,
+  })
     .sort((a, b) => a.name.localeCompare(b.name, "zh-CN", { numeric: true }));
 
   if (!files.length) {
@@ -10230,21 +10833,23 @@ replaceImageInput.addEventListener("change", async () => {
   try {
     const nowText = formatDateTime();
     const keys = [];
+    const thumbKeys = [];
     const entries = [];
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
-      const dataUrl = await readFileAsDataURL(file);
-      const key = `${replaceTargetCard.dataset.file}__color_${index + 1}_${Date.now()}`;
-      await saveImageToDB(key, dataUrl);
-      keys.push(key);
-      entries.push({ name: file.name, key, type: file.type || "image/jpeg", primary: index === 0 });
+      const baseKey = `${replaceTargetCard.dataset.file}__color_${index + 1}_${Date.now()}`;
+      const tiers = await persistArtworkImageTiers(baseKey, file);
+      keys.push(tiers.previewKey);
+      thumbKeys.push(tiers.thumbKey);
+      entries.push({ name: file.name, key: tiers.originalKey, type: file.type || "image/jpeg", primary: index === 0 });
       if (index === 0) {
-        setImageKey(replaceTargetCard, key);
-        applyImageData(replaceTargetCard, dataUrl);
+        setImageKey(replaceTargetCard, tiers.thumbKey);
+        applyImageData(replaceTargetCard, await resolveImageSource(tiers.thumbKey));
       }
     }
 
     setPaletteKeys(replaceTargetCard, keys);
+    setPaletteThumbKeys(replaceTargetCard, thumbKeys);
     setPaletteFiles(replaceTargetCard, entries);
     replaceTargetCard.dataset.colors = files.length;
     replaceTargetCard.dataset.version = nowText;
@@ -10382,6 +10987,27 @@ document.addEventListener("click", (event) => {
     const reviewCard = resetReview.closest(".review-work-card");
     const sourceCard = reviewCard ? sourceCardByFile(reviewCard.dataset.reviewFile) : null;
     if (sourceCard) openReviewConfirmation(sourceCard, "待评审", () => resetReviewDecision(sourceCard));
+    return;
+  }
+
+  const workLoadMore = event.target.closest("[data-work-load-more]");
+  if (workLoadMore) {
+    workRenderLimit += WORK_RENDER_BATCH;
+    applyWorkGalleryBatch();
+    return;
+  }
+
+  const libraryLoadMore = event.target.closest("[data-library-load-more]");
+  if (libraryLoadMore) {
+    libraryGridRenderLimit += LIBRARY_GRID_BATCH;
+    renderLibraryGrid();
+    return;
+  }
+
+  const reviewLoadMore = event.target.closest("[data-review-load-more]");
+  if (reviewLoadMore) {
+    reviewRenderLimit += REVIEW_RENDER_BATCH;
+    renderDailyReviewBoard();
     return;
   }
 
@@ -10683,12 +11309,13 @@ profileAvatar?.addEventListener("click", () => {
 });
 
 profileAvatarInput?.addEventListener("change", async () => {
-  const file = profileAvatarInput.files?.[0];
+  const [file] = acceptedUploadFiles(profileAvatarInput.files, {
+    label: "头像",
+    maxBytes: 5 * 1024 * 1024,
+    imageOnly: true,
+    maxCount: 1,
+  });
   if (!file) return;
-  if (!file.type.startsWith("image/")) {
-    showToast("请选择图片作为头像。", "warning");
-    return;
-  }
   const imageData = await readFileAsDataURL(file);
   saveCurrentProfilePatch({ avatar: imageData });
   showToast("头像已更新。", "success");
@@ -10696,13 +11323,12 @@ profileAvatarInput?.addEventListener("change", async () => {
 });
 
 logoutButton.addEventListener("click", () => {
-  const portal = currentAccount.role === "客户" ? "client" : "employee";
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(SESSION_ACCOUNT_DATA_KEY);
   appShell.classList.add("locked");
   loginScreen.classList.remove("hidden");
   roleSelect.disabled = false;
-  if (userBadge) userBadge.textContent = "未登录";
+  if (userBadge) if (userBadge) userBadge.textContent = "未登录";
   if (profileNameInput) profileNameInput.textContent = "";
   if (profileRoleLabel) profileRoleLabel.textContent = "";
   if (profileAvatar) {
@@ -10720,7 +11346,9 @@ logoutButton.addEventListener("click", () => {
     clientPassword.value = "";
     clientRememberPassword.checked = false;
   }
-  switchLoginPortal(portal);
+  window.KingLoginPortal?.setSubmitting("employee", false);
+  window.KingLoginPortal?.setSubmitting("client", false);
+  switchLoginPortal("entry");
   lockBodyScroll(false);
   releaseFileURLs();
 });
@@ -10733,10 +11361,9 @@ enhanceWorkCards();
 syncReviewCardPreviews();
 configureRoleNavigation(roleSelect.value);
 updateRoleDashboard(roleSelect.value);
-hydrateStoredImages();
+initialImageHydration = hydrateStoredImages();
 renderSleepList();
 renderDailyReviewBoard();
-seedKingCaseLibrary();
 restoreRememberedLogins();
 const storedSessionAccount = localStorage.getItem(SESSION_KEY);
 const requestedPortal = new URLSearchParams(window.location.search).get("portal");
@@ -10755,7 +11382,7 @@ if (requestedPortal === "client" && storedSessionContext?.account?.role !== "客
 } else if (storedSessionAccount && demoAccounts[storedSessionAccount]) {
   applyLogin(storedSessionAccount, demoAccounts[storedSessionAccount]);
 } else {
-  switchLoginPortal(requestedPortal === "client" ? "client" : "employee");
+  switchLoginPortal(requestedPortal === "client" ? "client" : requestedPortal === "employee" ? "employee" : "entry");
 }
 
 // ================= 客户看稿入口页（Silk 背景 + 玻璃面板） =================
@@ -10970,6 +11597,8 @@ function startViewing() {
 // —— 全屏客户花型库 ——
 let vlibFilterState = null;
 let vlibSelectedOnly = false;
+const VLIB_RENDER_BATCH = 12;
+let vlibRenderLimit = VLIB_RENDER_BATCH;
 function vlibEnsureState() {
   if (!vlibFilterState) {
     vlibFilterState = {};
@@ -11005,29 +11634,71 @@ function renderVlibFilters() {
       </div></div>`;
   }).join("");
 }
-function renderVlibGallery() {
+function vlibCardHtml(card, lockedBySales) {
+  const file = card.dataset.file;
+  const soldOut = lockedBySales.has(file);
+  const picked = libraryCart.has(file);
+  const colors = Number(card.dataset.colors || 1);
+  const check = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const previewSrc = cardPreviewSource(card);
+  const imageKey = card.dataset.imageKey || "";
+  const imageMarkup = previewSrc
+    ? `<img src="${escapeHtml(previewSrc)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`
+    : imageKey
+      ? `<img data-image-key="${escapeHtml(imageKey)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`
+      : "";
+  return `<div class="vlib-card ${picked ? "picked" : ""} ${soldOut ? "owned" : ""}" data-vlib-work="${escapeHtml(file)}">
+    <div class="vlib-thumb" data-image-shell>${imageMarkup}</div>
+    ${soldOut
+      ? `<span class="vlib-owned-tag">已独家售出</span>`
+      : `<button class="vlib-add ${picked ? "added" : ""}" type="button" data-vlib-add="${escapeHtml(file)}" aria-label="${picked ? "已选，点击取消" : "加入选稿"}">${picked ? check : "+"}</button>`}
+    <div class="vlib-hover"><strong>${escapeHtml(file)}</strong><span>${soldOut ? "已独家售出" : `${colors} 配色`}</span></div>
+  </div>`;
+}
+
+function syncVlibGallerySelection(grid) {
+  const check = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  grid.querySelectorAll(".vlib-card").forEach((tile) => {
+    const picked = libraryCart.has(tile.dataset.vlibWork);
+    tile.classList.toggle("picked", picked);
+    const add = tile.querySelector("[data-vlib-add]");
+    if (!add) return;
+    add.classList.toggle("added", picked);
+    add.innerHTML = picked ? check : "+";
+    add.setAttribute("aria-label", picked ? "已选，点击取消" : "加入选稿");
+  });
+}
+
+function renderVlibGallery(reset = false) {
   const grid = document.querySelector("#vlibGallery");
   if (!grid) return;
   const cards = vlibFilteredCards();
-  // 该客户已买过的花型：只做提示，不禁止（非独家可重复售卖；是否停售由管理员决定）
-  const ownedByThisCustomer = customerPurchasedFiles(viewerSession?.companyName || currentAccount.company || "");
-  const lockedBySales = exclusivelySoldFiles();   // 管理员标记为独家/买断 -> 才真正下架
-  grid.innerHTML = cards.length ? cards.map((card) => {
-    const file = card.dataset.file;
-    const repeat = ownedByThisCustomer.has(file);
-    const soldOut = lockedBySales.has(file);
-    const picked = libraryCart.has(file);
-    const colors = Number(card.dataset.colors || 1);
-    const check = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    return `<div class="vlib-card ${picked ? "picked" : ""} ${soldOut ? "owned" : ""}" data-vlib-work="${escapeHtml(file)}">
-      <div class="vlib-thumb" style="${card.dataset.imageData ? `background-image:url('${card.dataset.imageData}')` : ""}"></div>
-      ${soldOut
-        ? `<span class="vlib-owned-tag">已独家售出</span>`
-        : `${repeat ? `<span class="vlib-owned-tag soft">已购买过</span>` : ""}
-           <button class="vlib-add ${picked ? "added" : ""}" type="button" data-vlib-add="${escapeHtml(file)}" aria-label="${picked ? "已选，点击取消" : "加入选稿"}">${picked ? check : "+"}</button>`}
-      <div class="vlib-hover"><strong>${escapeHtml(file)}</strong><span>${soldOut ? "已独家售出" : repeat ? `${colors} 配色 · 该客户已购买过` : `${colors} 配色`}</span></div>
-    </div>`;
-  }).join("") : `<p class="empty-state">未找到符合条件的花型。</p>`;
+  const lockedBySales = exclusivelySoldFiles();
+  const signature = cards.map((card) => card.dataset.file).join("|");
+  const needsReset = reset || grid.dataset.renderSignature !== signature;
+  if (needsReset) {
+    grid.innerHTML = "";
+    grid.dataset.renderSignature = signature;
+    vlibRenderLimit = VLIB_RENDER_BATCH;
+    grid.scrollTop = 0;
+  }
+  if (!cards.length) {
+    grid.innerHTML = `<p class="empty-state">未找到符合条件的花型。</p>`;
+    return;
+  }
+  grid.querySelector("[data-vlib-load-more]")?.remove();
+  const rendered = grid.querySelectorAll(".vlib-card").length;
+  const target = Math.min(cards.length, Math.max(vlibRenderLimit, VLIB_RENDER_BATCH));
+  if (target > rendered) {
+    grid.insertAdjacentHTML("beforeend", cards.slice(rendered, target).map((card) => vlibCardHtml(card, lockedBySales)).join(""));
+  }
+  vlibRenderLimit = target;
+  syncVlibGallerySelection(grid);
+  if (target < cards.length) {
+    grid.insertAdjacentHTML("beforeend", `<button class="gallery-auto-load-sentinel" type="button" data-gallery-auto-load data-vlib-load-more tabindex="-1" aria-hidden="true"></button>`);
+  }
+  hydrateLazyKeyImages(grid);
+  observeGalleryAutoLoad(grid);
 }
 function openViewerLibraryOverlay() {
   const ov = document.querySelector("#viewerLibrary");
@@ -11038,7 +11709,7 @@ function openViewerLibraryOverlay() {
   const sub = document.querySelector("#vlibSubtitle");
   if (sub && viewerSession) sub.textContent = `正在为 ${viewerSession.companyName} · ${viewerSession.contactName} 选稿`;
   renderVlibFilters();
-  renderVlibGallery();
+  renderVlibGallery(true);
   ov.classList.add("active");
   ov.setAttribute("aria-hidden", "false");
   document.body.classList.add("viewer-open");
@@ -11229,7 +11900,7 @@ function saveViewerNewClient(startAfter) {
     else if (input.checked) st.add(input.value);
     else st.delete(input.value);
     renderVlibFilters();
-    renderVlibGallery();
+    renderVlibGallery(true);
   });
   // 筛选：下拉开关
   document.querySelector("#vlibFilter")?.addEventListener("click", (e) => {
@@ -11251,6 +11922,12 @@ function saveViewerNewClient(startAfter) {
   });
   // 画廊：加入/取消 + 预览
   document.querySelector("#vlibGallery")?.addEventListener("click", (e) => {
+    const more = e.target.closest("[data-vlib-load-more]");
+    if (more) {
+      vlibRenderLimit += VLIB_RENDER_BATCH;
+      renderVlibGallery();
+      return;
+    }
     const add = e.target.closest("[data-vlib-add]");
     if (add) {
       e.stopPropagation();
@@ -11270,9 +11947,21 @@ function saveViewerNewClient(startAfter) {
     const work = e.target.closest("[data-vlib-work]");
     if (work) {
       const card = [...workCards].find((c) => c.dataset.file === work.dataset.vlibWork);
-      if (card) openLightbox(card);
+      if (card) openCustomerPatternViewer(card.dataset.file, { previewOnly: true });
     }
   });
+  let vlibScrollFrame = 0;
+  document.querySelector("#vlibGallery")?.addEventListener("scroll", (e) => {
+    if (vlibScrollFrame) return;
+    vlibScrollFrame = requestAnimationFrame(() => {
+      vlibScrollFrame = 0;
+      const grid = e.currentTarget;
+      if (grid.scrollHeight - grid.scrollTop - grid.clientHeight < 420 && grid.querySelector("[data-vlib-load-more]")) {
+        vlibRenderLimit += VLIB_RENDER_BATCH;
+        renderVlibGallery();
+      }
+    });
+  }, { passive: true });
   // 查看已选 → 小悬浮窗展示已选花型
   document.querySelector("#vlibViewSelected")?.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -11293,20 +11982,22 @@ function saveViewerNewClient(startAfter) {
     if (rm) {
       libraryCart.delete(rm.dataset.vlibUnpick);
       renderLibraryCart();
-      renderVlibGallery();
+      renderVlibGallery(true);
       renderVlibSelectedPop();
     }
   });
   // 完成本次选稿 → 汇总到该客户的选稿车
-  document.querySelector("#vlibFinish")?.addEventListener("click", () => {
-    updateViewerSelectionBar();
-    commitViewerSelection();
+  document.querySelector("#vlibFinish")?.addEventListener("click", async () => {
     const n = libraryCart.size;
-    libraryCart = new Set();
-    if (viewerSession) { viewerSession.selectedPatternIds = []; try { localStorage.setItem(VIEWER_SESSION_KEY, JSON.stringify(viewerSession)); } catch (e) {} }
-    closeViewerLibraryOverlay();
-    renderCartPreview();
-    switchView("cart");
+    await runWithAppLoading("正在保存本次选稿…", async () => {
+      updateViewerSelectionBar();
+      commitViewerSelection();
+      libraryCart = new Set();
+      if (viewerSession) { viewerSession.selectedPatternIds = []; try { localStorage.setItem(VIEWER_SESSION_KEY, JSON.stringify(viewerSession)); } catch (e) {} }
+      closeViewerLibraryOverlay();
+      renderCartPreview();
+      switchView("cart");
+    }, 460);
     showToast(`本次选稿已保存到选稿车，共 ${n} 款。`, "success");
   });
 })();
@@ -11371,7 +12062,7 @@ function renderCartPage() {
   }).join("");
 }
 
-function cartEntryToOrder(entryId) {
+async function cartEntryToOrder(entryId) {
   const entry = selectionCarts.find((c) => c.id === entryId);
   if (!entry) return;
   const order = {
@@ -11382,21 +12073,23 @@ function cartEntryToOrder(entryId) {
     progress: "已确认下单 / 待整理交付",
     deliverStatus: "未交付",
     agreementStatus: "未发起",
-    price: entry.files.length * 100,
+    price: null,
     patternIds: [...entry.files],
     files: entry.files.map((f) => ({ name: f })),
     designers: [],
     painters: [],
     createdAt: formatDateTime(),
   };
-  studioOrders.unshift(order);
-  selectionCarts = selectionCarts.filter((c) => c.id !== entryId);
-  saveSelectionCarts();
-  saveStudioState();
-  renderCartPage();
-  if (typeof renderOrderCenter === "function") renderOrderCenter();
+  await runWithAppLoading("正在生成订单…", async () => {
+    studioOrders.unshift(order);
+    selectionCarts = selectionCarts.filter((c) => c.id !== entryId);
+    saveSelectionCarts();
+    saveStudioState();
+    renderCartPage();
+    if (typeof renderOrderCenter === "function") renderOrderCenter();
+    switchView("orders");
+  }, 460);
   showToast(`已为 ${entry.company} 生成订单，进入订单中心。`, "success");
-  switchView("orders");
 }
 
 document.querySelector("#cartCustomerList")?.addEventListener("click", (event) => {
@@ -11487,11 +12180,28 @@ function exclusivelySoldFiles() {
   return set;
 }
 
-/** 客户已购买（含待解锁）的全部花型 —— 仅用于提示"已购买过" */
+/** 客户已购买（含待解锁）的全部花型 —— 用于客户档案与购买记录统计 */
 function customerPurchasedFiles(company) {
   const set = new Set(customerDeliveredFiles(company));
   customerLockedFiles(company).forEach((_id, f) => set.add(f));
   return set;
+}
+
+const CUSTOMER_LIBRARY_STATE_KEY = "studio_site_customer_library_state_v1";
+let myLibraryUnlockNoticeTimer = 0;
+let recentLibraryUnlock = { company: "", files: [], until: 0 };
+const MY_LIBRARY_BATCH = 24;
+let myLibraryRenderLimit = MY_LIBRARY_BATCH;
+function readCustomerLibraryState() {
+  try {
+    const value = JSON.parse(localStorage.getItem(CUSTOMER_LIBRARY_STATE_KEY) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+function writeCustomerLibraryState(value) {
+  try { localStorage.setItem(CUSTOMER_LIBRARY_STATE_KEY, JSON.stringify(value)); } catch {}
 }
 
 function customerAgreementOrders(company) {
@@ -11514,7 +12224,7 @@ function renderCustomerAgreementSection(company) {
   section.classList.toggle("hidden", orders.length === 0);
   section.innerHTML = orders.length ? `
     <div class="customer-agreement-head">
-      <div><h3>待完成的交付协议</h3><p>签署后工作室才能交付并解锁高清文件。</p></div>
+      <div><h3>待完成的交付协议</h3><p>签署后才能交付并解锁高清文件。</p></div>
       <span>${orders.length} 份</span>
     </div>
     <div class="customer-agreement-list">
@@ -11523,7 +12233,7 @@ function renderCustomerAgreementSection(company) {
         return `<div class="customer-agreement-row">
           <div>
             <strong>${escapeHtml(order.id)}</strong>
-            <span>${orderPatternList(order).length} 款花型 · ${signed ? "已签署，等待工作室交付" : "等待你签署"}</span>
+            <span>${orderPatternList(order).length} 款花型 · ${signed ? "已签署，等待交付" : "等待你签署"}</span>
           </div>
           ${signed
             ? '<span class="customer-agreement-signed">已签署</span>'
@@ -11533,28 +12243,71 @@ function renderCustomerAgreementSection(company) {
     </div>` : "";
 }
 
-function renderMyPatternLibrary() {
+function renderMyPatternLibrary(reset = false) {
   const grid = document.querySelector("#myLibraryGrid");
   if (!grid) return;
+  if (reset) myLibraryRenderLimit = MY_LIBRARY_BATCH;
   const company = currentAccount.company || currentAccount.name || "";
   const title = document.querySelector("#myLibraryTitle");
-  if (title) title.textContent = `我的花型库 · ${company}`;
+  if (title) title.textContent = "我的花型库";
   renderCustomerAgreementSection(company);
   const files = customerDeliveredFiles(company);
   const locked = customerLockedFiles(company);
+  const libraryState = readCustomerLibraryState();
+  const previousState = libraryState[company];
+  const previouslyLocked = new Set(previousState?.locked || []);
+  const newlyUnlocked = previousState
+    ? files.filter((file) => previouslyLocked.has(file))
+    : [];
+  if (newlyUnlocked.length) {
+    recentLibraryUnlock = { company, files: [...newlyUnlocked], until: Date.now() + 6000 };
+  }
+  const visibleUnlocks = recentLibraryUnlock.company === company && recentLibraryUnlock.until > Date.now()
+    ? recentLibraryUnlock.files.filter((file) => files.includes(file))
+    : newlyUnlocked;
+  libraryState[company] = { delivered: [...files], locked: [...locked.keys()] };
+  writeCustomerLibraryState(libraryState);
+  const newlyUnlockedSet = new Set(visibleUnlocks);
+  const unlockNotice = document.querySelector("#myLibraryUnlockNotice");
+  if (unlockNotice) {
+    clearTimeout(myLibraryUnlockNoticeTimer);
+    unlockNotice.classList.toggle("hidden", visibleUnlocks.length === 0);
+    unlockNotice.textContent = visibleUnlocks.length
+      ? `${visibleUnlocks.length} 款花型已完成交付，现在可以预览和下载。`
+      : "";
+  }
   const lockIcon = `<svg class="mylib-lock-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2"/><path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9"/><circle cx="12" cy="15.4" r="1.5"/></svg>`;
-  const cell = (f, isLocked, orderId) => {
+  const cell = (f, isLocked, orderId, unlockIndex = -1) => {
     const card = sourceCardByFile(f);
-    const img = card?.dataset.imageData ? `background-image:url('${card.dataset.imageData}')` : "";
+    const previewSrc = cardPreviewSource(card);
+    const imageKey = card?.dataset.imageKey || "";
+    const imageMarkup = previewSrc
+      ? `<img src="${escapeHtml(previewSrc)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`
+      : imageKey
+        ? `<img data-image-key="${escapeHtml(imageKey)}" alt="" loading="lazy" decoding="async" fetchpriority="low" />`
+        : "";
     const colors = Number(card?.dataset.colors || 1);
     const name = card?.querySelector(".work-head strong")?.textContent.trim() || f;
-    return `<button class="mylib-card ${isLocked ? "locked" : ""}" type="button" ${isLocked ? `data-mylib-locked="${escapeHtml(orderId || "")}"` : `data-mylib-file="${escapeHtml(f)}"`}>
-      <span class="mylib-thumb" style="${img}">${isLocked ? `<span class="mylib-lock">${lockIcon}<small>等待交付解锁</small></span>` : ""}</span>
+    const justUnlocked = !isLocked && newlyUnlockedSet.has(f);
+    return `<button class="mylib-card ${isLocked ? "locked" : ""} ${justUnlocked ? "just-unlocked" : ""}" type="button" ${justUnlocked ? `style="--unlock-index:${unlockIndex}"` : ""} ${isLocked ? `disabled aria-disabled="true" title="等待交付后解锁"` : `data-mylib-file="${escapeHtml(f)}"`}>
+      <span class="mylib-thumb" data-image-shell>${imageMarkup}${isLocked ? `<span class="mylib-lock">${lockIcon}<small>等待交付解锁</small></span>` : ""}</span>
       <span class="mylib-info"><strong>${escapeHtml(name)}</strong><small>${isLocked ? "已购买 · 待解锁" : `${colors} 配色`}</small></span>
     </button>`;
   };
-  const html = [...locked.keys()].map((f) => cell(f, true, locked.get(f))).join("") + files.map((f) => cell(f, false)).join("");
-  grid.innerHTML = html || `<p class="empty-state">还没有属于你的花型。完成付款后，购买的花型会出现在这里。</p>`;
+  const deliveredFiles = [...visibleUnlocks, ...files.filter((file) => !newlyUnlockedSet.has(file))];
+  const entries = [
+    ...[...locked.keys()].map((file) => ({ file, locked: true, orderId: locked.get(file) })),
+    ...deliveredFiles.map((file) => ({ file, locked: false, orderId: "" })),
+  ];
+  const visibleEntries = entries.slice(0, myLibraryRenderLimit);
+  const html = visibleEntries.map((entry) => cell(entry.file, entry.locked, entry.orderId, visibleUnlocks.indexOf(entry.file))).join("");
+  grid.innerHTML = html
+    ? `${html}${visibleEntries.length < entries.length
+      ? `<button class="gallery-auto-load-sentinel" type="button" data-gallery-auto-load data-mylib-load-more tabindex="-1" aria-hidden="true"></button>`
+      : ""}`
+    : `<p class="empty-state">还没有属于你的花型。完成付款后，购买的花型会出现在这里。</p>`;
+  hydrateLazyKeyImages(grid);
+  observeGalleryAutoLoad(grid);
   // 客户已看过交付
   if (files.length) {
     studioOrders.forEach((o) => { if (customerOwnsOrder(o, company) && orderDeliverStatus(o) === "已交付") o.customerSeenDelivery = true; });
@@ -11562,10 +12315,9 @@ function renderMyPatternLibrary() {
   updateSidebarBadges();
 }
 document.querySelector("#myLibraryGrid")?.addEventListener("click", (e) => {
-  const lockedCell = e.target.closest("[data-mylib-locked]");
-  if (lockedCell) {
-    const oid = lockedCell.dataset.mylibLocked;
-    if (oid) openOrderDetail(oid); else showToast("该花型待工作室交付后解锁。", "warning");
+  if (e.target.closest("[data-mylib-load-more]")) {
+    myLibraryRenderLimit += MY_LIBRARY_BATCH;
+    renderMyPatternLibrary();
     return;
   }
   const c = e.target.closest("[data-mylib-file]");
@@ -11573,73 +12325,505 @@ document.querySelector("#myLibraryGrid")?.addEventListener("click", (e) => {
   openCustomerPatternViewer(c.dataset.mylibFile);
 });
 
-/* 客户端花型查看器：只有多配色浏览 + 下载原文件，不暴露任何内部信息 */
-function openCustomerPatternViewer(file) {
+/* 客户端花型查看器：沿用大图 + 右侧资料结构，仅开放客户需要的信息 */
+function openCustomerPatternViewer(file, options = {}) {
   const card = sourceCardByFile(file);
   if (!card) return;
+  const isLocked = Boolean(options.locked);
+  const previewOnly = Boolean(options.previewOnly);
   let ov = document.getElementById("custPatternViewer");
   if (!ov) {
     const st = document.createElement("style");
     st.textContent = `
-      #custPatternViewer{position:fixed;inset:0;z-index:1300;display:none}
-      #custPatternViewer.open{display:block}
-      #custPatternViewer .cpv-scrim{position:absolute;inset:0;background:rgba(20,18,16,.72)}
-      #custPatternViewer .cpv-box{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-        width:min(760px,92vw);max-height:88vh;overflow:auto;background:#fff;border-radius:18px;padding:24px}
-      #custPatternViewer .cpv-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-      #custPatternViewer .cpv-head h3{margin:0;font-size:18px}
-      #custPatternViewer .cpv-x{border:none;background:none;font-size:22px;color:#78716c;cursor:pointer}
-      #custPatternViewer .cpv-main{width:100%;aspect-ratio:4/3;border-radius:12px;background:#f5f4f2 center/cover no-repeat;border:1px solid #eae8e4}
-      #custPatternViewer .cpv-sub{font-size:13px;color:#57534e;margin:14px 0 8px}
-      #custPatternViewer .cpv-colors{display:flex;gap:10px;flex-wrap:wrap}
-      #custPatternViewer .cpv-c{width:64px;height:64px;border-radius:8px;background:#f5f4f2 center/cover no-repeat;
-        border:2px solid transparent;cursor:pointer}
-      #custPatternViewer .cpv-c.on{border-color:#1c1917}
-      #custPatternViewer .cpv-dl{margin-top:20px;width:100%;padding:14px;border:none;border-radius:10px;
-        background:#1c1917;color:#fff;font-size:15px;cursor:pointer}
-      #custPatternViewer .cpv-dl:hover{background:#000}`;
+      #custPatternViewer{z-index:1300}
+      #custPatternViewer.open{display:flex;opacity:1}
+      #custPatternViewer .cpv-main{position:relative;background-color:transparent}
+      #custPatternViewer .cpv-main.locked:after{content:"预览图 · 交付后可下载源文件";position:absolute;right:12px;bottom:12px;
+        padding:6px 10px;border-radius:7px;background:rgba(20,18,16,.72);color:#fff;font-size:11px;letter-spacing:.03em}
+      #custPatternViewer .cpv-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px}
+      #custPatternViewer .cpv-name-wrap{min-width:0;flex:1}
+      #custPatternViewer .cpv-name{margin:0;overflow-wrap:anywhere;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+        font-size:20px;line-height:1.3;cursor:text}
+      #custPatternViewer .cpv-name:hover:after{content:"  点击修改";color:rgba(255,255,255,.42);font-size:11px;font-weight:400}
+      #custPatternViewer .cpv-name.readonly{cursor:default}
+      #custPatternViewer .cpv-name.readonly:hover:after{content:""}
+      #custPatternViewer .cpv-name[contenteditable="true"]{outline:none;border-bottom:1px solid rgba(255,255,255,.6)}
+      #custPatternViewer .cpv-code{display:block;margin-top:8px;color:rgba(255,255,255,.48);font-size:12px}
+      #custPatternViewer .cpv-section{margin-top:12px;border-top:1px solid rgba(255,255,255,.12);padding-top:12px}
+      #custPatternViewer .cpv-section h4{margin:0 0 8px;font-size:14px}
+      #custPatternViewer .cpv-tags{display:flex;gap:8px;flex-wrap:wrap}
+      #custPatternViewer .cpv-tag{padding:6px 10px;border:1px solid rgba(255,255,255,.16);border-radius:6px;
+        background:rgba(255,255,255,.07);color:rgba(255,255,255,.86);font-size:12px}
+      #custPatternViewer .cpv-colors{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+      #custPatternViewer .cpv-c{position:relative;width:100%;height:116px;border:1px solid rgba(255,255,255,.14);
+        border-radius:8px;padding:7px;background:rgba(255,255,255,.07) center/contain no-repeat;cursor:pointer}
+      #custPatternViewer .cpv-c.on,#custPatternViewer .cpv-c:hover{border-color:rgba(255,255,255,.5);background-color:rgba(255,255,255,.14)}
+      #custPatternViewer .cpv-c:focus-visible{outline:3px solid rgba(255,255,255,.4);outline-offset:2px}
+      #custPatternViewer .cpv-file{display:flex;align-items:center;justify-content:space-between;gap:14px;width:100%;padding:12px 14px;
+        border:1px solid rgba(255,255,255,.16);border-radius:8px;background:rgba(255,255,255,.06);cursor:pointer}
+      #custPatternViewer .cpv-file+.cpv-file{margin-top:8px}
+      #custPatternViewer .cpv-file span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgba(255,255,255,.72);font-size:13px}
+      #custPatternViewer .cpv-file b{color:#9bc9ff;font-size:13px}
+      #custPatternViewer .cpv-empty{margin:0;color:rgba(255,255,255,.48);font-size:13px}`;
     document.head.appendChild(st);
     ov = document.createElement("div");
     ov.id = "custPatternViewer";
-    ov.innerHTML = `<div class="cpv-scrim" data-cpv-close></div><div class="cpv-box" id="cpvBox"></div>`;
+    ov.className = "lightbox";
+    ov.setAttribute("role", "dialog");
+    ov.setAttribute("aria-modal", "true");
+    ov.innerHTML = `<button class="lightbox-close cpv-x" data-cpv-close aria-label="关闭预览">×</button>
+      <div class="lightbox-content cpv-shell" id="cpvBox"></div>`;
     document.body.appendChild(ov);
-    ov.addEventListener("click", (e) => { if (e.target.closest("[data-cpv-close]")) { ov.classList.remove("open"); lockBodyScroll(false); } });
+    ov.addEventListener("click", (e) => {
+      if (e.target === ov || e.target.closest("[data-cpv-close]")) {
+        ov._cpvResizeObserver?.disconnect();
+        ov.classList.remove("open", "active");
+        lockBodyScroll(false);
+      }
+    });
   }
   const name = card.querySelector(".work-head strong")?.textContent.trim() || file;
-  const main = card.dataset.imageData || "";
+  const main = cardPreviewSource(card);
   let palette = [];
   try { palette = JSON.parse(card.dataset.paletteKeys || "[]"); } catch {}
+  const variants = [...new Set((palette.length ? palette : [card.dataset.imageKey]).filter(Boolean))];
+  const variantThumbs = getPaletteThumbKeys(card);
+  const tags = (card.dataset.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean);
+  const sourceFiles = getSourceFiles(card);
+  const deliveryFiles = sourceFiles;
   const box = document.getElementById("cpvBox");
-  box.innerHTML = `<div class="cpv-head"><h3>${escapeHtml(name)}</h3><button class="cpv-x" data-cpv-close>×</button></div>
-    <div class="cpv-main" id="cpvMain" style="${main ? `background-image:url('${main}')` : ""}"></div>
-    ${palette.length > 1 ? `<div class="cpv-sub">配色（${palette.length}）</div>
-      <div class="cpv-colors" id="cpvColors">${palette.map((k, i) => `<div class="cpv-c ${i === 0 ? "on" : ""}" data-cpv-key="${escapeHtml(k)}"></div>`).join("")}</div>` : ""}
-    <button class="cpv-dl" data-cpv-download="${escapeHtml(file)}">下载原文件</button>`;
-  // 异步载入配色缩略图
-  palette.forEach(async (k, i) => {
-    try {
-      const src = await resolveImageSource(k);
-      const el = box.querySelector(`[data-cpv-key="${CSS.escape(k)}"]`);
-      if (el && src) el.style.backgroundImage = `url('${src}')`;
-      if (i === 0 && src) document.getElementById("cpvMain").style.backgroundImage = `url('${src}')`;
-    } catch {}
+  const prevIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 6-6 6 6 6"></path></svg>';
+  const nextIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 6 6 6-6 6"></path></svg>';
+  box.innerHTML = `<figure class="lightbox-figure cpv-stage">
+      <div class="lightbox-image has-image cpv-main ${isLocked ? "locked" : ""}" id="cpvMain"></div>
+      <div class="lightbox-image-nav">
+        ${variants.length > 1 ? `<button class="lightbox-nav lightbox-prev cpv-nav cpv-prev" type="button" data-cpv-shift="-1" aria-label="上一个配色">${prevIcon}</button>` : ""}
+        ${variants.length > 1 ? `<button class="lightbox-nav lightbox-next cpv-nav cpv-next" type="button" data-cpv-shift="1" aria-label="下一个配色">${nextIcon}</button>` : ""}
+      </div>
+    </figure>
+    <aside class="lightbox-side cpv-side">
+      <div class="cpv-head"><div class="cpv-name-wrap"><h3 class="cpv-name ${previewOnly ? "readonly" : ""}" id="cpvName" ${previewOnly ? "" : 'title="点击修改名称"'}>${escapeHtml(name)}</h3>
+        <span class="cpv-code">花型编号 ${escapeHtml(file)}</span></div></div>
+      <section class="cpv-section"><h4>标签</h4><div class="cpv-tags">${tags.length
+        ? tags.map((tag) => `<span class="cpv-tag">${escapeHtml(tag)}</span>`).join("")
+        : `<p class="cpv-empty">未设置标签</p>`}</div></section>
+      <section class="cpv-section"><h4>其他配色 · ${variants.length || 1}</h4>
+        <div class="cpv-colors" id="cpvColors">${variants.map((key, index) => `<button type="button" aria-label="查看配色 ${index + 1}" class="cpv-c ${index === 0 ? "on" : ""}" data-cpv-key="${escapeHtml(key)}"></button>`).join("")}</div>
+      </section>
+      ${previewOnly ? "" : `<section class="cpv-section"><h4>源文件</h4>${!isLocked && deliveryFiles.length
+        ? deliveryFiles.map((source, index) => `<button class="cpv-file" type="button" data-cpv-source="${index}"><span>${escapeHtml(source.name || `源文件 ${index + 1}`)}</span><b>下载</b></button>`).join("")
+        : `<p class="cpv-empty">${isLocked ? "交付完成后可下载源文件" : "未上传源文件"}</p>`}</section>`}
+    </aside>`;
+  let activeVariantIndex = 0;
+  const mainElement = box.querySelector("#cpvMain");
+  const setPreviewSource = (src) => {
+    if (!src || !mainElement) return;
+    mainElement.style.backgroundImage = `url(${JSON.stringify(src)})`;
+  };
+  ov._cpvResizeObserver?.disconnect();
+  ov._cpvResizeObserver = null;
+  const activateVariant = async (index) => {
+    if (!variants.length) return;
+    activeVariantIndex = (index + variants.length) % variants.length;
+    const key = variants[activeVariantIndex];
+    box.querySelectorAll(".cpv-c").forEach((item, itemIndex) => item.classList.toggle("on", itemIndex === activeVariantIndex));
+    const src = await resolveImageSource(key);
+    if (src) {
+      setPreviewSource(src);
+      const option = box.querySelector(`[data-cpv-key="${CSS.escape(key)}"]`);
+      if (option) option.style.backgroundImage = `url(${JSON.stringify(src)})`;
+    }
+  };
+  if (main) setPreviewSource(main);
+  variantThumbs.slice(0, variants.length).forEach((key, index) => {
+    resolveImageSource(key).then((src) => {
+      const option = box.querySelectorAll(".cpv-c")[index];
+      if (option && src) option.style.backgroundImage = `url(${JSON.stringify(src)})`;
+    }).catch(() => {});
   });
-  box.querySelector("#cpvColors")?.addEventListener("click", async (e) => {
-    const c = e.target.closest("[data-cpv-key]");
-    if (!c) return;
-    box.querySelectorAll(".cpv-c").forEach((x) => x.classList.toggle("on", x === c));
-    const src = await resolveImageSource(c.dataset.cpvKey);
-    if (src) document.getElementById("cpvMain").style.backgroundImage = `url('${src}')`;
+  activateVariant(0).catch(() => {});
+  box.querySelector("#cpvColors")?.addEventListener("click", async (event) => {
+    const option = event.target.closest("[data-cpv-key]");
+    if (!option) return;
+    await activateVariant(variants.indexOf(option.dataset.cpvKey));
   });
-  box.querySelector("[data-cpv-download]")?.addEventListener("click", async () => {
-    const key = card.dataset.sourceFileKey || card.dataset.imageKey;
-    const fname = card.dataset.sourceFileName || `${name}.png`;
-    if (key) await downloadStoredFile(key, fname);
-    else showToast("原文件尚未上传，请联系工作室。", "warning");
+  box.querySelectorAll("[data-cpv-shift]").forEach((button) => {
+    button.addEventListener("click", () => activateVariant(activeVariantIndex + Number(button.dataset.cpvShift || 0)));
   });
-  ov.classList.add("open");
+  if (ov._cpvKeyHandler) document.removeEventListener("keydown", ov._cpvKeyHandler);
+  ov._cpvKeyHandler = (event) => {
+    if (!ov.classList.contains("open")) return;
+    if (event.key === "Escape") {
+      ov.classList.remove("open", "active");
+      lockBodyScroll(false);
+      return;
+    }
+    if (variants.length < 2) return;
+    if (event.key === "ArrowLeft") activateVariant(activeVariantIndex - 1);
+    if (event.key === "ArrowRight") activateVariant(activeVariantIndex + 1);
+  };
+  document.addEventListener("keydown", ov._cpvKeyHandler);
+  box.querySelectorAll("[data-cpv-source]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const source = deliveryFiles[Number(button.dataset.cpvSource)];
+      if (source?.key) await downloadStoredFile(source.key, source.name);
+      else showToast("未上传源文件。", "warning");
+    });
+  });
+  const nameElement = box.querySelector("#cpvName");
+  if (!previewOnly) nameElement?.addEventListener("click", () => {
+    if (nameElement.isContentEditable) return;
+    const previous = nameElement.textContent.trim();
+    nameElement.contentEditable = "true";
+    nameElement.focus();
+    const range = document.createRange();
+    range.selectNodeContents(nameElement);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const commit = () => {
+      const next = nameElement.textContent.trim();
+      nameElement.contentEditable = "false";
+      if (!next) {
+        nameElement.textContent = previous;
+        return;
+      }
+      const cardTitle = card.querySelector(".work-head strong");
+      if (cardTitle) cardTitle.textContent = next;
+      nameElement.textContent = next;
+      saveStudioState();
+      renderMyPatternLibrary();
+      showToast("花型名称已更新。", "success");
+    };
+    nameElement.addEventListener("blur", commit, { once: true });
+    nameElement.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        nameElement.blur();
+      }
+      if (event.key === "Escape") {
+        nameElement.textContent = previous;
+        nameElement.blur();
+      }
+    }, { once: true });
+  });
+  ov.classList.add("open", "active");
   lockBodyScroll(true);
 }
+
+/* ================= 团队资源库 ================= */
+function resourceTypeMeta(resource) {
+  return resource.type === "link" ? { icon: "↗" } : { icon: "＋" };
+}
+
+function resourceFolderName(folderId) {
+  return resourceFolders.find((folder) => folder.id === folderId)?.name || "未分类";
+}
+
+function resourceFolderOptions(selectedId = "") {
+  return `<option value="" ${selectedId ? "" : "selected"}>未分类</option>`
+    + resourceFolders.map((folder) => `<option value="${escapeHtml(folder.id)}" ${folder.id === selectedId ? "selected" : ""}>${escapeHtml(folder.name)}</option>`).join("");
+}
+
+function resourceCardHtml(resource) {
+  const meta = resourceTypeMeta(resource);
+  const actionLabel = resource.type === "link" ? "打开网站" : "下载";
+  return `<article class="resource-card" data-resource-id="${escapeHtml(resource.id)}">
+    <div class="resource-card-top">
+      <span class="resource-type-icon">${meta.icon}</span>
+      <button class="resource-delete" type="button" data-resource-delete="${escapeHtml(resource.id)}" aria-label="删除 ${escapeHtml(resource.title)}">×</button>
+    </div>
+    <div class="resource-card-copy">
+      <strong title="${escapeHtml(resource.title)}">${escapeHtml(resource.title)}</strong>
+      <p>${escapeHtml(resource.type === "link" ? resource.url : resource.name || "")}</p>
+      <small>${escapeHtml(resourceFolderName(resource.folderId))} · ${escapeHtml(resource.creator || "团队成员")} · ${escapeHtml(resource.createdAt || "")}</small>
+    </div>
+    <div class="resource-card-actions">
+      <button type="button" data-resource-open="${escapeHtml(resource.id)}">${actionLabel}</button>
+      <select data-resource-move="${escapeHtml(resource.id)}" aria-label="移动资源到文件夹">${resourceFolderOptions(resource.folderId)}</select>
+    </div>
+  </article>`;
+}
+
+function renderResourceLibrary() {
+  const folderList = document.querySelector("#resourceFolderList");
+  const grid = document.querySelector("#resourceGrid");
+  if (!folderList || !grid) return;
+  const unfiledCount = teamResources.filter((resource) => !resource.folderId).length;
+  folderList.innerHTML = `
+    <button class="resource-folder-row ${activeResourceFolder === "all" ? "active" : ""}" type="button" data-resource-folder="all"><span>全部资源</span><b>${teamResources.length}</b></button>
+    <button class="resource-folder-row ${activeResourceFolder === "unfiled" ? "active" : ""}" type="button" data-resource-folder="unfiled"><span>未分类</span><b>${unfiledCount}</b></button>
+    ${resourceFolders.map((folder) => {
+      const count = teamResources.filter((resource) => resource.folderId === folder.id).length;
+      return `<div class="resource-folder-entry"><button class="resource-folder-row ${activeResourceFolder === folder.id ? "active" : ""}" type="button" data-resource-folder="${escapeHtml(folder.id)}"><span>${escapeHtml(folder.name)}</span><b>${count}</b></button><button class="resource-folder-delete" type="button" data-resource-folder-delete="${escapeHtml(folder.id)}" aria-label="删除文件夹 ${escapeHtml(folder.name)}">×</button></div>`;
+    }).join("")}`;
+  const folderCount = document.querySelector("#resourceFolderCount");
+  if (folderCount) folderCount.textContent = String(resourceFolders.length);
+  const currentTitle = activeResourceFolder === "all"
+    ? "全部资源"
+    : activeResourceFolder === "unfiled"
+      ? "未分类"
+      : resourceFolderName(activeResourceFolder);
+  const title = document.querySelector("#resourceCurrentTitle");
+  if (title) title.textContent = currentTitle;
+  const keyword = resourceSearchText.trim().toLowerCase();
+  const resources = teamResources
+    .filter((resource) => activeResourceFolder === "all"
+      || (activeResourceFolder === "unfiled" ? !resource.folderId : resource.folderId === activeResourceFolder))
+    .filter((resource) => !keyword || `${resource.title} ${resource.name || ""} ${resource.url || ""}`.toLowerCase().includes(keyword))
+    .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  const count = document.querySelector("#resourceResultCount");
+  if (count) count.textContent = `${resources.length} 项`;
+  grid.innerHTML = resources.length
+    ? resources.map(resourceCardHtml).join("")
+    : `<div class="resource-empty"><span>□</span><strong>这里还没有资源</strong><p>上传文件、收藏网站，或新建文件夹开始整理。</p></div>`;
+  const websiteFolder = document.querySelector("#resourceWebsiteFolder");
+  if (websiteFolder) websiteFolder.innerHTML = resourceFolderOptions(activeResourceFolder === "all" || activeResourceFolder === "unfiled" ? "" : activeResourceFolder);
+}
+
+function toggleResourceComposer(id, show) {
+  ["resourceFolderComposer", "resourceWebsiteComposer"].forEach((composerId) => {
+    const composer = document.getElementById(composerId);
+    if (composer) composer.classList.toggle("hidden", !(show && composerId === id));
+  });
+  if (show) requestAnimationFrame(() => document.querySelector(`#${id} input`)?.focus());
+}
+
+async function openTeamResource(resource) {
+  if (!resource) return;
+  if (resource.type === "link") {
+    window.open(resource.url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  const dataUrl = await getImageFromDB(resource.key);
+  if (!dataUrl) {
+    showToast("资源文件暂时无法读取。", "error");
+    return;
+  }
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = resource.name || resource.title || "团队资源";
+  link.click();
+}
+
+function createResourceFolder() {
+  const input = document.querySelector("#resourceFolderName");
+  const name = input?.value.trim();
+  if (!name) {
+    showToast("请先输入文件夹名称。", "warning");
+    input?.focus();
+    return;
+  }
+  if (resourceFolders.some((folder) => folder.name === name)) {
+    showToast("已经有同名文件夹。", "warning");
+    return;
+  }
+  const folder = { id: `RF-${Date.now()}`, name, createdAt: formatDateTime(), creator: currentAccount.name };
+  resourceFolders.push(folder);
+  activeResourceFolder = folder.id;
+  if (input) input.value = "";
+  toggleResourceComposer("", false);
+  saveStudioState();
+  renderResourceLibrary();
+  showToast(`文件夹「${name}」已创建。`, "success");
+}
+
+function saveWebsiteResource() {
+  const nameInput = document.querySelector("#resourceWebsiteName");
+  const urlInput = document.querySelector("#resourceWebsiteUrl");
+  const folderInput = document.querySelector("#resourceWebsiteFolder");
+  const title = nameInput?.value.trim();
+  let url = urlInput?.value.trim();
+  if (url && !/^https?:\/\//i.test(url)) url = `https://${url}`;
+  try { new URL(url); } catch { showToast("请输入有效的网站地址。", "warning"); urlInput?.focus(); return; }
+  if (!title) { showToast("请填写网站名称。", "warning"); nameInput?.focus(); return; }
+  teamResources.push({
+    id: `RS-${Date.now()}`,
+    type: "link",
+    title,
+    url,
+    folderId: folderInput?.value || "",
+    creator: currentAccount.name,
+    createdAt: formatDateTime(),
+  });
+  if (nameInput) nameInput.value = "";
+  if (urlInput) urlInput.value = "";
+  toggleResourceComposer("", false);
+  saveStudioState();
+  renderResourceLibrary();
+  showToast("网站已加入资源库。", "success");
+}
+
+async function uploadTeamResources(files) {
+  const accepted = acceptedUploadFiles(files, {
+    label: "团队资源",
+    maxBytes: MAX_RESOURCE_FILE_BYTES,
+    maxCount: 20,
+  });
+  if (!accepted.length) return;
+  await runWithAppLoading(`正在上传 ${accepted.length} 个资源…`, async () => {
+    for (let index = 0; index < accepted.length; index += 1) {
+      const file = accepted[index];
+      const id = `RS-${Date.now()}-${index}`;
+      const key = `team_resource_${id}`;
+      await saveImageToDB(key, file);
+      teamResources.push({
+        id,
+        type: "file",
+        title: file.name.replace(/\.[^.]+$/, "") || file.name,
+        name: file.name,
+        mime: file.type || "application/octet-stream",
+        size: file.size,
+        key,
+        folderId: activeResourceFolder === "all" || activeResourceFolder === "unfiled" ? "" : activeResourceFolder,
+        creator: currentAccount.name,
+        createdAt: formatDateTime(),
+      });
+    }
+    saveStudioState();
+    renderResourceLibrary();
+  }, 420);
+  showToast(`已上传 ${accepted.length} 个团队资源。`, "success");
+}
+
+function applyIncomingSharedResourceState(raw) {
+  if (!raw) return;
+  let incoming;
+  try { incoming = JSON.parse(raw); } catch { return; }
+  const nextFolders = Array.isArray(incoming.resourceFolders) ? incoming.resourceFolders : [];
+  const nextResources = Array.isArray(incoming.resources) ? incoming.resources : [];
+  const changed = JSON.stringify([nextFolders, nextResources]) !== JSON.stringify([resourceFolders, teamResources]);
+  if (!changed) return;
+  resourceFolders = nextFolders;
+  teamResources = nextResources;
+  if (activeViewId() === "resources") renderResourceLibrary();
+}
+
+/* 资源库事件 */
+document.querySelector("#resourceNewFolder")?.addEventListener("click", () => toggleResourceComposer("resourceFolderComposer", true));
+document.querySelector("#resourceUploadButton")?.addEventListener("click", () => {
+  const type = document.querySelector("#resourceUploadType")?.value || "file";
+  if (type === "link") {
+    renderResourceLibrary();
+    toggleResourceComposer("resourceWebsiteComposer", true);
+    return;
+  }
+  toggleResourceComposer("", false);
+  document.querySelector("#resourceFileInput")?.click();
+});
+document.querySelector("#resourceFolderSave")?.addEventListener("click", createResourceFolder);
+document.querySelector("#resourceFolderCancel")?.addEventListener("click", () => toggleResourceComposer("", false));
+document.querySelector("#resourceWebsiteSave")?.addEventListener("click", saveWebsiteResource);
+document.querySelector("#resourceWebsiteCancel")?.addEventListener("click", () => toggleResourceComposer("", false));
+document.querySelector("#resourceFolderName")?.addEventListener("keydown", (event) => { if (event.key === "Enter") createResourceFolder(); });
+document.querySelector("#resourceFileInput")?.addEventListener("change", async (event) => {
+  await uploadTeamResources(event.target.files);
+  event.target.value = "";
+});
+document.querySelector("#resourceSearch")?.addEventListener("input", (event) => {
+  resourceSearchText = event.target.value;
+  renderResourceLibrary();
+});
+document.querySelector("#resourceFolderList")?.addEventListener("click", (event) => {
+  const folderButton = event.target.closest("[data-resource-folder]");
+  if (folderButton) {
+    activeResourceFolder = folderButton.dataset.resourceFolder;
+    renderResourceLibrary();
+    return;
+  }
+  const deleteButton = event.target.closest("[data-resource-folder-delete]");
+  if (!deleteButton) return;
+  const folder = resourceFolders.find((item) => item.id === deleteButton.dataset.resourceFolderDelete);
+  if (!folder) return;
+  openExitConfirmation({
+    title: `删除文件夹「${folder.name}」？`,
+    message: "文件夹中的资源不会被删除，将统一移动到「未分类」。",
+    submitText: "删除文件夹",
+    onConfirm: () => {
+      teamResources.forEach((resource) => { if (resource.folderId === folder.id) resource.folderId = ""; });
+      resourceFolders = resourceFolders.filter((item) => item.id !== folder.id);
+      if (activeResourceFolder === folder.id) activeResourceFolder = "all";
+      saveStudioState();
+      renderResourceLibrary();
+    },
+  });
+});
+document.querySelector("#resourceGrid")?.addEventListener("click", async (event) => {
+  const openButton = event.target.closest("[data-resource-open]");
+  if (openButton) {
+    await openTeamResource(teamResources.find((item) => item.id === openButton.dataset.resourceOpen));
+    return;
+  }
+  const deleteButton = event.target.closest("[data-resource-delete]");
+  if (!deleteButton) return;
+  const resource = teamResources.find((item) => item.id === deleteButton.dataset.resourceDelete);
+  if (!resource) return;
+  openExitConfirmation({
+    title: `删除资源「${resource.title}」？`,
+    message: "资源将从团队资源库中移除。",
+    submitText: "确认删除",
+    onConfirm: () => {
+      teamResources = teamResources.filter((item) => item.id !== resource.id);
+      saveStudioState();
+      renderResourceLibrary();
+    },
+  });
+});
+document.querySelector("#resourceGrid")?.addEventListener("change", (event) => {
+  const select = event.target.closest("[data-resource-move]");
+  if (!select) return;
+  const resource = teamResources.find((item) => item.id === select.dataset.resourceMove);
+  if (!resource) return;
+  resource.folderId = select.value;
+  saveStudioState();
+  renderResourceLibrary();
+});
+
+function refreshCustomerOrderViews() {
+  if (currentAccount.role !== "客户") return;
+  if (typeof renderMyOrders === "function") renderMyOrders();
+  if (activeViewId() === "myLibrary" && typeof renderMyPatternLibrary === "function") renderMyPatternLibrary();
+  if (activeOrderDetailId) {
+    const order = studioOrders.find((item) => item.id === activeOrderDetailId);
+    if (order) renderOrderDetailBody(order);
+  }
+  updateSidebarBadges();
+}
+
+function applyIncomingCustomerOrderState(raw) {
+  if (currentAccount.role !== "客户" || !raw) return false;
+  let incoming;
+  try { incoming = JSON.parse(raw); } catch { return false; }
+  if (!Array.isArray(incoming.orders)) return false;
+  const comparableOrders = (orders) => JSON.stringify((orders || []).map(({ customerSeenDelivery, ...order }) => order));
+  if (comparableOrders(incoming.orders) === comparableOrders(studioOrders)) return false;
+  const seenDelivery = new Set(studioOrders.filter((order) => order.customerSeenDelivery).map((order) => order.id));
+  studioState = { ...studioState, ...incoming };
+  lastPersistedStateJson = raw;
+  studioOrders = incoming.orders.map((order) => seenDelivery.has(order.id) ? { ...order, customerSeenDelivery: true } : order);
+  refreshCustomerOrderViews();
+  return true;
+}
+
+function syncCustomerOrdersFromStorage(retry = true) {
+  if (currentAccount.role !== "客户") return;
+  if (_saveTimer) {
+    if (retry) setTimeout(() => syncCustomerOrdersFromStorage(false), 380);
+    return;
+  }
+  try { applyIncomingCustomerOrderState(localStorage.getItem(STORAGE_KEY)); } catch {}
+}
+
+window.addEventListener("storage", (event) => {
+  if (event.key === STORAGE_KEY && event.newValue) {
+    applyIncomingCustomerOrderState(event.newValue);
+    applyIncomingSharedResourceState(event.newValue);
+  }
+});
+window.addEventListener("focus", () => setTimeout(() => syncCustomerOrdersFromStorage(), 80));
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") syncCustomerOrdersFromStorage();
+});
 // 客户档案 · 历史订单 → 打开订单详情
 document.addEventListener("click", (event) => {
   const row = event.target.closest("[data-cc-open-order]");

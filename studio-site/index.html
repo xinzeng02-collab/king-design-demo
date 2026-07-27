@@ -4,70 +4,138 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>KiNG DESiGN 管理系统</title>
-    <link rel="stylesheet" href="./styles.css?v=20260724-inapp-pay-v12" />
+    <link rel="preload" as="image" href="./assets/textile-studio-hero.png" type="image/png" fetchpriority="high" />
+    <link rel="stylesheet" href="./styles.css?v=20260727-library-spacing-v29" />
+    <link rel="stylesheet" href="./login-experience.css?v=20260726-login-v2" />
+    <link rel="stylesheet" href="./gallery-performance.css?v=20260727-performance-v2" />
   </head>
   <body>
-    <section class="login-screen" id="loginScreen">
-      <div class="login-visual">
-        <img src="./assets/textile-studio-hero.png" alt="家纺图案工作室" />
-      </div>
-      <div class="login-panel" id="employeeLoginPanel">
-        <p class="eyebrow">Design Studio Portal</p>
-        <h1>登录工作台</h1>
-
-        <form class="login-form" id="loginForm">
-          <label>
-            <span>账号</span>
-            <input id="username" name="username" autocomplete="username" required />
-          </label>
-          <label>
-            <span>密码</span>
-            <input id="password" name="password" type="password" autocomplete="current-password" required />
-          </label>
-          <label class="remember-login">
-            <input id="employeeRememberPassword" type="checkbox" />
-            <span>记住密码</span>
-          </label>
-          <p class="login-error" id="loginError" role="alert"></p>
-          <button class="primary-button" type="submit">登录</button>
-        </form>
-
-        <div class="login-assist">
-          <button id="openAccountApplication" type="button">申请账号</button>
-          <span aria-hidden="true">·</span>
-          <button id="openPasswordRecovery" type="button">忘记密码</button>
+    <section class="login-screen" id="loginScreen" data-login-view="entry" aria-label="KiNG DESiGN 品牌入口">
+      <div class="login-visual" id="loginVisual">
+        <div class="login-visual-frame" id="loginVisualFrame">
+          <img
+            class="login-visual-image"
+            id="loginVisualImage"
+            src="./assets/textile-studio-hero.png"
+            alt="KiNG DESiGN 纺织设计主视觉"
+            fetchpriority="high"
+            decoding="async"
+          />
+          <div class="login-visual-vignette" aria-hidden="true"></div>
         </div>
-
-        <div class="demo-accounts" aria-label="演示账号">
-          <button data-demo-account="admin">管理员 admin / admin123</button>
-          <button data-demo-account="designer">设计师 designer / designer123</button>
-          <button data-demo-account="painter">手绘师 painter / painter123</button>
-          <button data-demo-account="sampler">打样师 sampler / sampler123</button>
-          <button data-demo-account="sales">销售 sales / sales123</button>
+        <div class="login-visual-brand" aria-hidden="true">
+          <p><strong>KiNG</strong> <span>DESiGN</span></p>
         </div>
-        <button class="login-portal-switch" id="openClientLogin" type="button">进入客户端登录</button>
+        <div class="login-visual-origin" aria-hidden="true">
+          <i>＋</i>
+          <span>EST. 2026<br />NANTONG, CHINA</span>
+        </div>
       </div>
 
-      <div class="login-panel hidden" id="clientLoginPanel">
-        <p class="eyebrow">KiNG DESiGN CLIENT</p>
-        <h1>客户登录</h1>
-        <form class="login-form" id="clientLoginForm">
-          <label>
-            <span>账号</span>
-            <input id="clientUsername" name="clientUsername" autocomplete="username" required />
-          </label>
-          <label>
-            <span>密码</span>
-            <input id="clientPassword" name="clientPassword" type="password" autocomplete="current-password" required />
-          </label>
-          <label class="remember-login">
-            <input id="clientRememberPassword" type="checkbox" />
-            <span>记住密码</span>
-          </label>
-          <p class="login-error" id="clientLoginError" role="alert"></p>
-          <button class="primary-button" type="submit">登录</button>
-        </form>
-        <button class="login-portal-switch" id="openEmployeeLogin" type="button">返回员工登录</button>
+      <div class="login-side">
+        <div class="login-portal-stack">
+          <section class="login-portal login-entry-panel is-active" id="loginEntryPanel" data-login-panel="entry" aria-hidden="false">
+            <div class="login-entry-copy">
+              <p class="login-kicker">WELCOME TO</p>
+              <h1><strong>KiNG</strong> DESiGN<span>.</span></h1>
+            </div>
+            <div class="login-entry-actions">
+              <button class="login-entry-button primary" id="openEmployeeLogin" type="button" data-login-target="employee">
+                <span><strong>进入工作台</strong><small>FOR TEAM MEMBERS</small></span>
+                <i class="login-arrow" aria-hidden="true"></i>
+              </button>
+              <button class="login-entry-button secondary" id="openClientLogin" type="button" data-login-target="client">
+                <span><strong>客户看稿</strong><small>FOR CLIENTS</small></span>
+                <i class="login-arrow" aria-hidden="true"></i>
+              </button>
+            </div>
+          </section>
+
+          <section class="login-panel login-portal" id="employeeLoginPanel" data-login-panel="employee" aria-hidden="true">
+            <button class="login-back" type="button" data-login-target="entry"><span aria-hidden="true">←</span> 返回入口</button>
+            <div class="login-panel-heading">
+              <p class="login-kicker">TEAM MEMBER ACCESS</p>
+              <h1>欢迎回来</h1>
+              <p>登录 KiNG DESiGN 工作台</p>
+            </div>
+            <form class="login-form" id="loginForm">
+              <label class="login-field" for="username">
+                <span>账号</span>
+                <input id="username" name="username" autocomplete="username" placeholder="请输入工作台账号" required />
+              </label>
+              <label class="login-field" for="password">
+                <span>密码</span>
+                <span class="login-password-control">
+                  <input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required />
+                  <button class="login-password-toggle" type="button" data-password-toggle="password" aria-label="显示密码" aria-pressed="false">显示</button>
+                </span>
+              </label>
+              <p class="login-error" id="loginError" role="alert" aria-live="polite"></p>
+              <div class="login-form-options">
+                <label class="remember-login">
+                  <input id="employeeRememberPassword" type="checkbox" />
+                  <span>记住登录状态</span>
+                </label>
+                <div class="login-account-actions" aria-label="账号帮助">
+                  <button class="login-text-action" id="openAccountApplication" type="button">申请账号</button>
+                  <span aria-hidden="true"></span>
+                  <button class="login-text-action" id="openPasswordRecovery" type="button">忘记密码</button>
+                </div>
+              </div>
+              <button class="login-submit" type="submit" data-login-submit="employee">
+                <span class="login-submit-label">登录工作台</span>
+                <span class="login-submit-loading" aria-hidden="true"><i></i> 正在登录</span>
+              </button>
+            </form>
+
+            <div class="login-shortcuts">
+              <div class="login-shortcuts-head">
+                <span>快捷进入</span>
+              </div>
+              <div class="demo-accounts" aria-label="演示账号">
+                <button data-demo-account="admin">管理员</button>
+                <button data-demo-account="designer">设计师</button>
+                <button data-demo-account="painter">手绘师</button>
+                <button data-demo-account="sales">销售</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="login-panel login-portal" id="clientLoginPanel" data-login-panel="client" aria-hidden="true">
+            <button class="login-back" id="openEmployeeLoginEntry" type="button" data-login-target="entry"><span aria-hidden="true">←</span> 返回入口</button>
+            <div class="login-panel-heading">
+              <p class="login-kicker">CLIENT ACCESS</p>
+              <h1>客户看稿</h1>
+              <p>进入专属花型库，查看作品、选稿与订单</p>
+            </div>
+            <form class="login-form" id="clientLoginForm">
+              <label class="login-field" for="clientUsername">
+                <span>客户账号</span>
+                <input id="clientUsername" name="clientUsername" autocomplete="username" placeholder="请输入客户账号" required />
+              </label>
+              <label class="login-field" for="clientPassword">
+                <span>密码</span>
+                <span class="login-password-control">
+                  <input id="clientPassword" name="clientPassword" type="password" autocomplete="current-password" placeholder="请输入密码" required />
+                  <button class="login-password-toggle" type="button" data-password-toggle="clientPassword" aria-label="显示密码" aria-pressed="false">显示</button>
+                </span>
+              </label>
+              <p class="login-error" id="clientLoginError" role="alert" aria-live="polite"></p>
+              <div class="login-form-options">
+                <label class="remember-login">
+                  <input id="clientRememberPassword" type="checkbox" />
+                  <span>记住登录状态</span>
+                </label>
+              </div>
+              <button class="login-submit" type="submit" data-login-submit="client">
+                <span class="login-submit-label">进入客户花型库</span>
+                <span class="login-submit-loading" aria-hidden="true"><i></i> 正在验证</span>
+              </button>
+            </form>
+            <p class="login-client-note">账号由 KiNG DESiGN 团队创建并提供，如无法登录请联系您的对接人员。</p>
+          </section>
+        </div>
+        <p class="login-copyright">© 2026 KiNG DESiGN. All rights reserved.</p>
       </div>
     </section>
 
@@ -84,7 +152,7 @@
           </div>
           <div class="auth-form-columns">
             <label><span>登录账号</span><input id="applicationUsername" required autocomplete="username" placeholder="请创建登录账号" /></label>
-            <label><span>岗位</span><select id="applicationRole" required><option value="">请选择岗位</option><option>设计师</option><option>手绘师</option><option>打样师</option><option>销售</option></select></label>
+            <label><span>岗位</span><select id="applicationRole" required><option value="">请选择岗位</option><option>设计师</option><option>手绘师</option><option>销售</option></select></label>
           </div>
           <div class="auth-form-columns">
             <label><span>设置密码</span><input id="applicationPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="至少 8 位" /></label>
@@ -121,13 +189,13 @@
           <strong>KiNG</strong><span>DESiGN</span>
         </div>
         <nav class="nav" aria-label="主导航">
-          <button class="nav-item active" data-view="dashboard" data-roles="管理员,设计师,手绘师,打样师,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect></svg><span class="nav-label">总控台</span></button>
+          <button class="nav-item active" data-view="dashboard" data-roles="管理员,设计师,手绘师,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect></svg><span class="nav-label">总控台</span></button>
           <button class="nav-item" data-view="review" data-roles="管理员"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="16" rx="2"></rect><path d="M9 5V3h6v2M8.5 13l2 2 5-5"></path></svg><span class="nav-label">每日评审</span></button>
-          <button class="nav-item" data-view="projects" data-roles="管理员,设计师,手绘师,打样师"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 17v-5M10 17V8M14 17V4M18 17v-8"></path></svg><span class="nav-label">项目进度</span></button>
           <button class="nav-item" data-view="team" data-roles="管理员"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3.5 20v-2a5.5 5.5 0 0 1 11 0v2M14 14.5a4.5 4.5 0 0 1 6.5 4V20"></path></svg><span class="nav-label">我的团队</span></button>
           <button class="nav-item" data-view="designer" data-roles="管理员,设计师,手绘师"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="1.5"></rect><circle cx="9" cy="10" r="1.5"></circle><path d="m6.5 17 4-4 2.8 2.5 2.2-2 2 3.5"></path></svg><span class="nav-label">我的稿件</span></button>
+          <button class="nav-item" data-view="resources" data-roles="管理员,设计师,手绘师,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h6.5l1.7 2H20v11H4z"></path><path d="M8 12h8M8 15h5"></path></svg><span class="nav-label">资源库</span></button>
           <button class="nav-item" data-view="library" data-roles="管理员,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h7l2-2h8v13.5h-17z"></path></svg><span class="nav-label">客户中心</span></button>
-          <button class="nav-item" data-view="orders" data-roles="管理员,设计师,手绘师,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1 12H6zM8 8a4 4 0 0 1 8 0M9 12v2M15 12v2"></path></svg><span class="nav-label">订单中心</span></button>
+          <button class="nav-item" data-view="orders" data-roles="管理员,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1 12H6zM8 8a4 4 0 0 1 8 0M9 12v2M15 12v2"></path></svg><span class="nav-label">订单中心</span></button>
           <button class="nav-item" data-view="myLibrary" data-roles="客户"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="1.5"></rect><circle cx="9" cy="10" r="1.5"></circle><path d="m6.5 17 4-4 2.8 2.5 2.2-2 2 3.5"></path></svg><span class="nav-label">我的花型库</span></button>
           <button class="nav-item" data-view="myOrders" data-roles="客户"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16l-3-2-3 2-3-2-3 2V4z"></path><path d="M9 9h6M9 13h4"></path></svg><span class="nav-label">订单中心</span></button>
         </nav>
@@ -151,7 +219,6 @@
           <option>管理员</option>
           <option>设计师</option>
           <option>手绘师</option>
-          <option>打样师</option>
           <option>销售</option>
         </select>
       </aside>
@@ -189,7 +256,6 @@
             <header class="top-popover-head"><h3>快捷新建</h3><button id="quickCreateClose" type="button" aria-label="关闭快捷新建">×</button></header>
             <div class="quick-create-list" id="quickCreateGrid">
               <button type="button" data-quick-action="design"><strong>上传设计/手绘</strong><small>上传设计稿或手绘稿</small></button>
-              <button type="button" data-quick-action="project"><strong>新建项目</strong><small>创建设计流程项目</small></button>
               <button type="button" data-quick-action="customer"><strong>新增客户</strong><small>录入客户信息</small></button>
               <button type="button" data-quick-action="order"><strong>新建订单</strong><small>空车去选稿，有稿先核对选稿车</small></button>
             </div>
@@ -315,26 +381,6 @@
             </section>
           </div>
 
-          <div class="role-dashboard" data-role-dashboard="打样师">
-            <div class="metric-grid">
-              <article class="metric-card"><span>待打样</span><strong>7</strong><p>2 个客户项目</p></article>
-              <article class="metric-card"><span>打样中</span><strong>5</strong><p>今日需更新照片</p></article>
-              <article class="metric-card alert"><span>需返工</span><strong>2</strong><p>色差待确认</p></article>
-              <article class="metric-card"><span>已完成</span><strong>13</strong><p>本月累计</p></article>
-            </div>
-            <section class="panel">
-              <div class="panel-head">
-                <h3>打样师总控制台</h3>
-                <span>样品制作与反馈</span>
-              </div>
-              <div class="personal-task-list">
-                <p><b>蓝白瓷感四件套</b><span>打样中 / 06.25 完成</span></p>
-                <p><b>香槟色提花方案</b><span>已拍照 / 等待客户确认</span></p>
-                <p><b>春夏清透花卉</b><span>待打样 / 等待最终图稿</span></p>
-              </div>
-            </section>
-          </div>
-
           <div class="role-dashboard" data-role-dashboard="销售">
             <div class="metric-grid">
               <article class="metric-card"><span>可选稿件</span><strong>24</strong><p>客户稿库今日可推荐</p></article>
@@ -345,7 +391,6 @@
             <section class="panel">
               <div class="panel-head">
                 <h3>销售总控制台</h3>
-                <span>客户看稿与订单跟进</span>
               </div>
               <div class="personal-task-list">
                 <p><b>南通家纺客户</b><span>选稿车 3 组 / 等待确认</span></p>
@@ -394,30 +439,6 @@
           </div>
           <div class="review-board review-card-grid" id="reviewBoard">
             <p class="empty-state">暂无待评审稿件。上传设计稿或手绘稿后会出现在这里。</p>
-          </div>
-        </section>
-
-        <section class="view" id="projects">
-          <div class="project-board-shell">
-            <div class="project-board-toolbar">
-              <div>
-                <button class="primary-button" id="openProjectModal" data-admin-action type="button">+ 新建项目</button>
-                <button class="project-draft-entry" id="openProjectDrafts" data-admin-action type="button">草稿箱 <span id="projectDraftCount">0</span></button>
-                <button class="project-draft-entry" id="openArchivedProjects" type="button">已归档项目 <span id="projectArchiveCount">0</span></button>
-                <div class="project-type-filter" id="projectTypeFilter" role="group" aria-label="项目类型筛选">
-                  <label><input type="checkbox" value="all" checked /><span>全部类型</span></label>
-                  <label><input type="checkbox" value="选稿" checked /><span>选稿</span></label>
-                  <label><input type="checkbox" value="定制" checked /><span>定制项目</span></label>
-                  <label><input type="checkbox" value="内部" checked /><span>内部项目</span></label>
-                  <span class="visually-hidden" id="projectTypeFilterSummary">全部类型</span>
-                </div>
-              </div>
-              <span>拖拽卡片可在阶段间移动</span>
-            </div>
-
-            <div class="project-board-scroll" aria-label="项目阶段看板">
-              <div class="my-project-grid project-board" id="projectBoard"></div>
-            </div>
           </div>
         </section>
 
@@ -481,9 +502,8 @@
           <div class="customer-center" id="customerCenter">
             <aside class="customer-list-panel">
               <div class="cc-list-head"><strong id="customerListCount">客户列表</strong></div>
-              <div class="cc-list-filter" id="customerListFilter"></div>
               <div class="cc-list-cols">
-                <span>客户 / 公司</span><span>联系人</span><span>已购花型</span><span>最近购买</span><span>状态</span><span></span>
+                <span>客户 / 公司</span><span>联系人</span><span>已购花型</span><span>最近购买</span><span></span>
               </div>
               <div class="cc-list-body" id="customerListBody"></div>
               <div class="cc-list-pager" id="customerListPager"></div>
@@ -592,9 +612,6 @@
                 <option value="已交付">已交付</option>
               </select>
             </label>
-            <button class="order-search-btn" id="orderSearchBtn" type="button" aria-label="搜索">
-              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="m20 20-3.2-3.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            </button>
           </div>
 
           <div class="order-table-wrap" id="orderList"></div>
@@ -612,9 +629,9 @@
           <div class="section-head">
             <div>
               <h2 id="myLibraryTitle">我的花型库</h2>
-              <p>这里是本次合作中，已确认交付给你的专属花型。点击可放大预览与下载。</p>
             </div>
           </div>
+          <div class="mylib-unlock-notice hidden" id="myLibraryUnlockNotice" role="status" aria-live="polite"></div>
           <div class="customer-agreement-section hidden" id="customerAgreementSection"></div>
           <div class="my-library-grid" id="myLibraryGrid"></div>
         </section>
@@ -623,7 +640,7 @@
           <div class="section-head">
             <div>
               <h2>订单中心</h2>
-              <p>这里是你与工作室的全部订单：签约、支付、交付与历史记录。</p>
+              <p>这里是你与 KiNG DESiGN 的全部订单：签约、支付、交付与历史记录。</p>
             </div>
           </div>
           <div class="mo-toolbar">
@@ -724,69 +741,54 @@
           </div>
         </section>
 
-        <section class="view" id="sampling">
-          <div class="section-head">
+        <section class="view" id="resources">
+          <div class="section-head resource-section-head">
             <div>
-              <h2>打样作品栏</h2>
-              <p>上传样品图片，并完整记录供应商、图稿来源、设计师、手绘师和所属项目。</p>
+              <h2>资源库</h2>
+              <p>集中保存团队常用文件和网页资料。</p>
             </div>
-            <div class="upload-actions">
-              <button class="ghost-button">上传单个样品</button>
-              <button class="primary-button">批量上传样品</button>
+            <div class="resource-head-actions">
+              <button class="ghost-button" id="resourceNewFolder" type="button">新建文件夹</button>
+              <label class="resource-upload-type">
+                <span>上传类型</span>
+                <select id="resourceUploadType">
+                  <option value="file">上传文件</option>
+                  <option value="link">上传网页</option>
+                </select>
+              </label>
+              <button class="primary-button" id="resourceUploadButton" type="button">上传</button>
             </div>
+          </div>
+          <input class="visually-hidden" id="resourceFileInput" type="file" multiple />
+
+          <div class="resource-composer hidden" id="resourceFolderComposer">
+            <label><span>文件夹名称</span><input id="resourceFolderName" maxlength="30" placeholder="例如：趋势报告" /></label>
+            <button class="primary-button" id="resourceFolderSave" type="button">创建</button>
+            <button class="ghost-button" id="resourceFolderCancel" type="button">取消</button>
+          </div>
+          <div class="resource-composer hidden" id="resourceWebsiteComposer">
+            <label><span>网站名称</span><input id="resourceWebsiteName" maxlength="80" placeholder="例如：色彩趋势网站" /></label>
+            <label class="resource-url-field"><span>网址</span><input id="resourceWebsiteUrl" type="url" placeholder="https://example.com" /></label>
+            <label><span>保存到</span><select id="resourceWebsiteFolder"></select></label>
+            <button class="primary-button" id="resourceWebsiteSave" type="button">保存</button>
+            <button class="ghost-button" id="resourceWebsiteCancel" type="button">取消</button>
           </div>
 
-          <div class="sample-grid">
-            <article class="sample-card">
-              <div class="sample-photo pattern pattern-a"></div>
-              <div class="sample-info">
-                <div class="work-head">
-                  <strong>蓝白瓷感四件套样品</strong>
-                  <span class="status working">打样中</span>
-                </div>
-                <dl>
-                  <div><dt>供应商</dt><dd>南通织造一厂 / 张经理</dd></div>
-                  <div><dt>所属项目</dt><dd>蓝白瓷感客户定制项目</dd></div>
-                  <div><dt>图稿信息</dt><dd>设计师：林若 / 手绘师：无引用</dd></div>
-                  <div><dt>项目成员</dt><dd>林若、许然、陈一</dd></div>
-                  <div><dt>预计完成</dt><dd>06.25 / 等待枕套图案确认</dd></div>
-                </dl>
+          <div class="resource-layout">
+            <aside class="resource-folders">
+              <div class="resource-folder-head"><strong>文件夹</strong><span id="resourceFolderCount">0</span></div>
+              <div class="resource-folder-list" id="resourceFolderList"></div>
+            </aside>
+            <section class="resource-browser">
+              <div class="resource-browser-toolbar">
+                <div><h3 id="resourceCurrentTitle">全部资源</h3><span id="resourceResultCount">0 项</span></div>
+                <label class="resource-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg><input id="resourceSearch" type="search" placeholder="搜索资源" /></label>
               </div>
-            </article>
-            <article class="sample-card">
-              <div class="sample-photo pattern pattern-c"></div>
-              <div class="sample-info">
-                <div class="work-head">
-                  <strong>春夏清透花卉四件套样品</strong>
-                  <span class="status waiting">待打样</span>
-                </div>
-                <dl>
-                  <div><dt>供应商</dt><dd>绍兴数码印花厂 / 王工</dd></div>
-                  <div><dt>所属项目</dt><dd>春夏清透花卉四件套系列</dd></div>
-                  <div><dt>图稿信息</dt><dd>设计师：许然 / 手绘师：阿沁</dd></div>
-                  <div><dt>项目成员</dt><dd>许然、阿沁、周禾、陈一</dd></div>
-                  <div><dt>引用关系</dt><dd>设计稿引用阿沁手绘藤蔓，出售后双方结算</dd></div>
-                </dl>
-              </div>
-            </article>
-            <article class="sample-card">
-              <div class="sample-photo pattern pattern-b"></div>
-              <div class="sample-info">
-                <div class="work-head">
-                  <strong>香槟色提花方案样品</strong>
-                  <span class="status done">已完成</span>
-                </div>
-                <dl>
-                  <div><dt>供应商</dt><dd>海宁家纺样品中心 / 刘主管</dd></div>
-                  <div><dt>所属项目</dt><dd>轻奢几何客户定制项目</dd></div>
-                  <div><dt>图稿信息</dt><dd>设计师：林若 / 手绘师：无引用</dd></div>
-                  <div><dt>项目成员</dt><dd>林若、孟禾、陈一</dd></div>
-                  <div><dt>备注</dt><dd>样品照片已上传，等待客户确认</dd></div>
-                </dl>
-              </div>
-            </article>
+              <div class="resource-grid" id="resourceGrid"></div>
+            </section>
           </div>
         </section>
+
       </main>
     </div>
 
@@ -838,12 +840,6 @@
               <button class="primary-button" id="saveReviewNote" type="button">保存备注</button>
             </div>
           </section>
-          <section class="source-file-panel hidden" id="sourceFilePanel">
-            <div class="source-file-panel-head">
-              <strong>源文件</strong>
-            </div>
-            <div class="source-file-download-list" id="sourceFileDownloadList"></div>
-          </section>
           <section class="order-file-panel hidden" id="orderFilePanel">
             <button class="ghost-button source-file-button" id="orderFileUploadButton" type="button">查看文件夹</button>
             <button class="ghost-button order-file-state-button" id="orderFileStateButton" type="button">未审核</button>
@@ -864,6 +860,12 @@
           </section>
           <section class="reference-material-panel" id="referenceMaterialPanel">
             <div class="reference-material-list" id="referenceMaterialList"></div>
+          </section>
+          <section class="source-file-panel hidden" id="sourceFilePanel">
+            <div class="source-file-panel-head">
+              <strong>源文件</strong>
+            </div>
+            <div class="source-file-download-list" id="sourceFileDownloadList"></div>
           </section>
         </aside>
       </div>
@@ -922,7 +924,7 @@
 
         <section class="source-upload-section">
           <div class="panel-head">
-            <div><h3>源文件</h3><p>支持 PS、PSD、AI、TIFF、JPEG 等格式，最多上传 6 个，供评审与后续制作下载。</p></div>
+            <div><h3>源文件</h3></div>
           </div>
           <input id="artworkSourceFile" type="file" multiple accept=".ps,.psd,.ai,.tif,.tiff,.jpg,.jpeg,.png,application/postscript,image/tiff,image/jpeg,image/png" />
           <button class="ghost-button full-add-button standard-add-button" id="chooseSourceFile" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg><span>增加</span></button>
@@ -954,7 +956,7 @@
 
         <section class="reference-panel">
           <div class="panel-head">
-            <h3>参考图</h3>
+            <h3>参考图 / 原创声明</h3>
           </div>
           <input id="referenceFiles" type="file" multiple accept="image/*" />
           <div class="reference-actions">
@@ -1456,13 +1458,23 @@
 
     <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
+    <div class="app-loading-overlay hidden" id="appLoadingOverlay" role="status" aria-live="polite" aria-hidden="true">
+      <div class="app-loading-card">
+        <div class="app-loading-bounce" aria-hidden="true"><i></i><i></i></div>
+        <strong id="appLoadingText">正在加载…</strong>
+      </div>
+    </div>
+
     <input type="file" id="replaceImageInput" accept="image/*" multiple style="display:none" />
     <input type="file" id="addReferenceInput" accept="image/*" multiple style="display:none" />
     <input type="file" id="sourceFileInput" style="display:none" />
     <input type="file" id="paletteFileInput" accept=".jpeg,.jpg,.png,.psd,.tif,.tiff,image/jpeg,image/png,image/tiff,image/vnd.adobe.photoshop" multiple style="display:none" />
     <input type="file" id="projectDetailFileInput" accept=".psd,.ai,.jpg,.jpeg,.png,.pdf,.doc,.docx,.ppt,.pptx,application/postscript,image/jpeg,image/png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple style="display:none" />
 
-    <script src="./assets/king-cases/manifest.js?v=20260724-image-fix"></script>
-    <script src="./script.js?v=20260724-inapp-pay-v12"></script>
+    <script src="./assets/king-cases/manifest.js?v=20260727-image-tiers-v1"></script>
+    <script src="./storage-engine.js?v=20260727-blob-v1"></script>
+    <script src="./performance-runtime.js?v=20260727-performance-v2"></script>
+    <script src="./login-portals.js?v=20260726-login-v2"></script>
+    <script src="./script.js?v=20260727-project-flow-v33"></script>
   </body>
 </html>
