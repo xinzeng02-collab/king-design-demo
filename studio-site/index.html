@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>KiNG DESiGN 管理系统</title>
     <link rel="preload" as="image" href="./assets/textile-studio-hero.png" type="image/png" fetchpriority="high" />
-    <link rel="stylesheet" href="./styles.css?v=20260727-library-spacing-v29" />
+    <link rel="stylesheet" href="./styles.css?v=20260727-projects-v34" />
     <link rel="stylesheet" href="./login-experience.css?v=20260726-login-v2" />
     <link rel="stylesheet" href="./gallery-performance.css?v=20260727-performance-v2" />
   </head>
@@ -192,6 +192,7 @@
           <button class="nav-item active" data-view="dashboard" data-roles="管理员,设计师,手绘师,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect></svg><span class="nav-label">总控台</span></button>
           <button class="nav-item" data-view="review" data-roles="管理员"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="16" rx="2"></rect><path d="M9 5V3h6v2M8.5 13l2 2 5-5"></path></svg><span class="nav-label">每日评审</span></button>
           <button class="nav-item" data-view="team" data-roles="管理员"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3.5 20v-2a5.5 5.5 0 0 1 11 0v2M14 14.5a4.5 4.5 0 0 1 6.5 4V20"></path></svg><span class="nav-label">我的团队</span></button>
+          <button class="nav-item" data-view="projects" data-roles="管理员,设计师,手绘师,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="5" height="14" rx="1"></rect><rect x="10.5" y="5" width="5" height="9" rx="1"></rect><rect x="17" y="5" width="3" height="12" rx="1"></rect></svg><span class="nav-label">项目管理</span></button>
           <button class="nav-item" data-view="designer" data-roles="管理员,设计师,手绘师"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="1.5"></rect><circle cx="9" cy="10" r="1.5"></circle><path d="m6.5 17 4-4 2.8 2.5 2.2-2 2 3.5"></path></svg><span class="nav-label">我的稿件</span></button>
           <button class="nav-item" data-view="resources" data-roles="管理员,设计师,手绘师,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h6.5l1.7 2H20v11H4z"></path><path d="M8 12h8M8 15h5"></path></svg><span class="nav-label">资源库</span></button>
           <button class="nav-item" data-view="library" data-roles="管理员,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h7l2-2h8v13.5h-17z"></path></svg><span class="nav-label">客户中心</span></button>
@@ -430,6 +431,39 @@
             </div>
             <div class="team-grid" id="teamGrid"><p class="empty-state">暂无团队成员。</p></div>
           </section>
+        </section>
+
+        <section class="view" id="projects">
+          <div class="section-head">
+            <div>
+              <h2>项目管理</h2>
+              <p>从需求确认到内部定稿，跟踪每个项目的进度、成员与产出。</p>
+            </div>
+            <div class="pj-head-actions">
+              <button class="ghost-button" id="pjOpenArchive" type="button">历史项目</button>
+              <button class="primary-button" id="pjNew" type="button">＋ 新建项目</button>
+            </div>
+          </div>
+
+          <div class="pj-stats" id="pjStats"></div>
+
+          <div class="pj-toolbar">
+            <div class="pj-tabs">
+              <button class="pj-tab on" data-pj-level="project" type="button">项目视图</button>
+              <button class="pj-tab" data-pj-level="pattern" type="button">花型视图</button>
+            </div>
+            <div class="pj-filters">
+              <select id="pjTypeFilter">
+                <option value="all">全部类型</option>
+                <option value="定制">客户定制</option>
+                <option value="内部">内部系列</option>
+              </select>
+              <select id="pjOwnerFilter"><option value="all">全部负责人</option></select>
+              <input id="pjSearch" type="search" placeholder="搜索项目名称或客户" />
+            </div>
+          </div>
+
+          <div class="pj-board" id="pjBoard"></div>
         </section>
 
         <section class="view" id="designer">
@@ -881,6 +915,13 @@
           </section>
         </div>
 
+        <section class="source-upload-section">
+          <div class="panel-head">
+            <div><h3>关联项目</h3><p>选填。关联后本次稿件归入该项目，暂不进入公共作品库。</p></div>
+          </div>
+          <select id="uploadProjectSelect" class="pj-select"><option value="">不关联项目</option></select>
+        </section>
+
         <section class="source-upload-section palette-upload-section">
           <div class="panel-head">
             <div><h3>配色</h3><p>上传同一花型的不同配色，支持 JPEG、JPG、PNG、PSD、TIFF。</p></div>
@@ -1210,6 +1251,6 @@
     <script src="./storage-engine.js?v=20260727-blob-v1"></script>
     <script src="./performance-runtime.js?v=20260727-performance-v2"></script>
     <script src="./login-portals.js?v=20260726-login-v2"></script>
-    <script src="./script.js?v=20260727-project-flow-v33"></script>
+    <script src="./script.js?v=20260727-projects-v34"></script>
   </body>
 </html>

@@ -5,6 +5,92 @@
    重做项目进度时，请删除本段并实现真正的函数。
    =================================================================== */
 const PROJECT_MODULE_REMOVED = true;
+
+/* ===================================================================
+   项目管理 · 数据层
+   =================================================================== */
+const PJ_STAGES = [
+  { key: "需求确认", color: "#9ca3af" },
+  { key: "概念方案", color: "#6b7280" },
+  { key: "设计制作", color: "#4b5563" },
+  { key: "稿件评审", color: "#374151" },
+  { key: "修改完善", color: "#57534e" },
+  { key: "内部定稿", color: "#111111" },
+];
+const PJ_KEY = "studio_site_projects_v1";
+let pjProjects = [];
+let pjLevel = "project";
+let pjActiveId = null;
+
+function pjLoad() {
+  try { pjProjects = JSON.parse(localStorage.getItem(PJ_KEY) || "[]"); } catch { pjProjects = []; }
+  if (!Array.isArray(pjProjects)) pjProjects = [];
+}
+function pjSave() {
+  try { localStorage.setItem(PJ_KEY, JSON.stringify(pjProjects)); } catch {}
+}
+function pjById(id) { return pjProjects.find((p) => p.id === id) || null; }
+function pjMe() { return currentAccount.ownerKey || currentAccount.name || "me"; }
+
+/** 未读：每人独立。有人上传/推进后，其他成员该项目冒红点 */
+function pjUnreadCount(p) {
+  const me = pjMe();
+  return (p.feed || []).filter((f) => f.by !== me && !(p.seen || {})[me + "|" + f.id]).length;
+}
+function pjMarkSeen(p) {
+  const me = pjMe();
+  p.seen = p.seen || {};
+  (p.feed || []).forEach((f) => { p.seen[me + "|" + f.id] = 1; });
+  pjSave();
+}
+function pjPush(p, text, kind = "info") {
+  p.feed = p.feed || [];
+  p.feed.unshift({ id: `f${Date.now()}${Math.random().toString(36).slice(2, 6)}`, t: formatDateTime(), by: pjMe(), byName: currentAccount.name || "成员", text, kind });
+  if (p.feed.length > 60) p.feed.length = 60;
+  p.updatedAt = formatDateTime();
+}
+
+/* ---- 截止日与逾期 ---- */
+function pjDaysLeft(p) {
+  if (!p.deadline) return null;
+  const d = new Date(p.deadline + "T23:59:59");
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.ceil((d - Date.now()) / 86400000);
+}
+function pjDueBadge(p) {
+  const d = pjDaysLeft(p);
+  if (d === null) return "";
+  if (p.archived) return "";
+  if (d < 0) return `<span class="pj-due over">已逾期 ${-d} 天</span>`;
+  if (d === 0) return `<span class="pj-due warn">今天截止</span>`;
+  if (d <= 7) return `<span class="pj-due warn">还剩 ${d} 天</span>`;
+  return `<span class="pj-due">还剩 ${d} 天</span>`;
+}
+
+/* ---- 权限 ---- */
+function pjIsBoss() { return currentAccount.role === "管理员" || currentAccount.role === "老板"; }
+function pjCanDrag(p, toStage) {
+  if (pjIsBoss()) return true;
+  const me = pjMe();
+  const mine = (p.members || []).includes(me) || p.owner === me;
+  if (!mine) return false;
+  if (toStage === "内部定稿") return false;        // 只有管理员能定稿
+  return true;
+}
+
+/* ---- 任务 ---- */
+function pjTaskStats(p) {
+  const t = p.tasks || [];
+  return { done: t.filter((x) => x.done).length, total: t.length };
+}
+
+/* ---- 关联稿件（上传时选填）---- */
+function pjPatternsOf(p) {
+  return [...workCards].filter((c) => c.dataset.projectId === p.id);
+}
+function pjPatternStage(card) {
+  return card.dataset.pjStage || "每日新稿";
+}
 // 返回数组的
 function activeProjectItems() { return []; }
 function memberProjectItems() { return []; }
@@ -130,6 +216,484 @@ function projectStatusClass() { return ""; }
 function validProjectDate() { return true; }
 function projectDateText(v) { return v || ""; }
 function visibleProjectItems() { return []; }
+/* ===================================================================
+   项目管理 · 渲染
+   =================================================================== */
+function pjAvatars(keys, max = 3) {
+  const list = (keys || []).slice(0, max);
+  const extra = (keys || []).length - list.length;
+  return `<span class="pj-avs">${list.map((k) => {
+    const n = (typeof workOwnerName === "function" ? workOwnerName({ dataset: { workOwner: k } }) : k) || k;
+    return `<i class="pj-av" title="${escapeHtml(n)}">${escapeHtml(String(n).slice(0, 1))}</i>`;
+  }).join("")}${extra > 0 ? `<i class="pj-av more">+${extra}</i>` : ""}</span>`;
+}
+
+function pjFiltered() {
+  const t = document.querySelector("#pjTypeFilter")?.value || "all";
+  const o = document.querySelector("#pjOwnerFilter")?.value || "all";
+  const q = (document.querySelector("#pjSearch")?.value || "").trim().toLowerCase();
+  return pjProjects.filter((p) => !p.archived).filter((p) => {
+    if (t !== "all" && (p.type || "内部") !== t) return false;
+    if (o !== "all" && p.owner !== o) return false;
+    if (q && !(`${p.name} ${p.customer || ""}`.toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+
+function pjCardHtml(p) {
+  const { done, total } = pjTaskStats(p);
+  const unread = pjUnreadCount(p);
+  const pats = pjPatternsOf(p).length;
+  return `<article class="pj-card" draggable="${pjIsBoss() || (p.members || []).includes(pjMe()) || p.owner === pjMe()}" data-pj-card="${escapeHtml(p.id)}">
+    <div class="pj-card-top">
+      <strong>${escapeHtml(p.name)}</strong>
+      ${unread ? `<i class="pj-dot" title="有 ${unread} 条新动态"></i>` : ""}
+    </div>
+    <div class="pj-card-meta">
+      <span class="pj-type ${p.type === "定制" ? "custom" : ""}">${escapeHtml(p.type || "内部")}</span>
+      ${p.customer ? `<span class="pj-cust">${escapeHtml(p.customer)}</span>` : ""}
+    </div>
+    ${pjDueBadge(p)}
+    ${p.desc ? `<p class="pj-desc">${escapeHtml(p.desc)}</p>` : ""}
+    <div class="pj-card-foot">
+      ${pjAvatars([p.owner, ...(p.members || [])].filter(Boolean))}
+      <span class="pj-nums">
+        <i title="任务完成度">☑ ${done}/${total}</i>
+        <i title="本项目稿件">◈ ${pats}</i>
+      </span>
+    </div>
+  </article>`;
+}
+
+function pjPatternCardHtml(card) {
+  const f = card.dataset.file;
+  const p = pjById(card.dataset.projectId || "");
+  const img = card.dataset.imageData ? `background-image:url('${card.dataset.imageData}')` : "";
+  return `<article class="pj-card pj-pcard" draggable="true" data-pj-pattern="${escapeHtml(f)}">
+    <div class="pj-pthumb" style="${img}"></div>
+    <div class="pj-card-top"><strong>${escapeHtml(f)}</strong></div>
+    ${p ? `<div class="pj-card-meta"><span class="pj-type ${p.type === "定制" ? "custom" : ""}">${escapeHtml(p.name)}</span></div>` : `<div class="pj-card-meta"><span class="pj-type">未关联项目</span></div>`}
+  </article>`;
+}
+
+function renderProjectsView() {
+  const board = document.querySelector("#pjBoard");
+  if (!board) return;
+  // 负责人下拉
+  const ownerSel = document.querySelector("#pjOwnerFilter");
+  if (ownerSel && ownerSel.dataset.filled !== "1") {
+    const owners = [...new Set(pjProjects.map((p) => p.owner).filter(Boolean))];
+    ownerSel.innerHTML = `<option value="all">全部负责人</option>` + owners.map((o) => {
+      const n = (typeof workOwnerName === "function" ? workOwnerName({ dataset: { workOwner: o } }) : o) || o;
+      return `<option value="${escapeHtml(o)}">${escapeHtml(n)}</option>`;
+    }).join("");
+    ownerSel.dataset.filled = "1";
+  }
+  renderProjectStats();
+
+  if (pjLevel === "pattern") {
+    const stages = ["每日新稿", "出稿中", "往期修改", "打样", "已确认"];
+    const cards = [...workCards].filter((c) => !c.dataset.deletedAt);
+    board.innerHTML = stages.map((s) => {
+      const items = cards.filter((c) => pjPatternStage(c) === s);
+      return `<div class="pj-col" data-pj-pstage="${escapeHtml(s)}">
+        <div class="pj-col-head"><span>${s}</span><em>${items.length}</em></div>
+        <div class="pj-col-body">${items.slice(0, 40).map(pjPatternCardHtml).join("") || `<div class="pj-drop">拖动稿件到这里</div>`}</div>
+      </div>`;
+    }).join("");
+    return;
+  }
+
+  const list = pjFiltered();
+  board.innerHTML = PJ_STAGES.map((st) => {
+    const items = list.filter((p) => (p.stage || PJ_STAGES[0].key) === st.key);
+    return `<div class="pj-col" data-pj-stage="${escapeHtml(st.key)}">
+      <div class="pj-col-head"><span><i class="pj-col-dot" style="background:${st.color}"></i>${st.key}</span><em>${items.length}</em></div>
+      <div class="pj-col-body">${items.map(pjCardHtml).join("") || `<div class="pj-drop">拖动项目到这里</div>`}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderProjectStats() {
+  const box = document.querySelector("#pjStats");
+  if (!box) return;
+  const act = pjProjects.filter((p) => !p.archived);
+  const overdue = act.filter((p) => (pjDaysLeft(p) ?? 99) < 0).length;
+  const soon = act.filter((p) => { const d = pjDaysLeft(p); return d !== null && d >= 0 && d <= 7; }).length;
+  const doneStage = act.filter((p) => p.stage === "内部定稿").length;
+  const seg = PJ_STAGES.map((s) => {
+    const n = act.filter((p) => (p.stage || PJ_STAGES[0].key) === s.key).length;
+    return { ...s, n, pct: act.length ? (n / act.length) * 100 : 0 };
+  });
+  box.innerHTML = `
+    <div class="pj-stat"><div class="k">进行中项目</div><div class="v">${act.length}</div></div>
+    <div class="pj-stat"><div class="k">已到定稿</div><div class="v">${doneStage}</div></div>
+    <div class="pj-stat ${soon ? "warn" : ""}"><div class="k">7天内截止</div><div class="v">${soon}</div></div>
+    <div class="pj-stat ${overdue ? "over" : ""}"><div class="k">已逾期</div><div class="v">${overdue}</div></div>
+    <div class="pj-stat wide">
+      <div class="k">阶段分布</div>
+      <div class="pj-bar">${seg.map((s) => s.n ? `<i style="width:${s.pct}%;background:${s.color}" title="${s.key} ${s.n}"></i>` : "").join("")}</div>
+      <div class="pj-legend">${seg.map((s) => `<span><i style="background:${s.color}"></i>${s.key} ${s.n}</span>`).join("")}</div>
+    </div>`;
+}
+
+/* ===================================================================
+   项目管理 · 详情抽屉（进度环 / 任务清单 / 日历 / 成员 / 文件 / 动态）
+   =================================================================== */
+function pjEnsureDrawer() {
+  if (document.getElementById("pjDrawer")) return;
+  const el = document.createElement("div");
+  el.id = "pjDrawer";
+  el.innerHTML = `<div class="pjd-scrim" data-pjd-close></div>
+    <div class="pjd-panel"><div class="pjd-head"><h2 id="pjdTitle">项目</h2>
+      <button class="pjd-x" data-pjd-close type="button">×</button></div>
+      <div class="pjd-body" id="pjdBody"></div></div>`;
+  document.body.appendChild(el);
+  el.addEventListener("click", (e) => { if (e.target.closest("[data-pjd-close]")) pjCloseDetail(); });
+}
+function pjCloseDetail() {
+  document.getElementById("pjDrawer")?.classList.remove("open");
+  pjActiveId = null; lockBodyScroll(false);
+}
+function pjDonut(done, total) {
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const r = 42, c = 2 * Math.PI * r;
+  return `<svg class="pj-donut" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="${r}" fill="none" stroke="#eceae6" stroke-width="12"/>
+    <circle cx="50" cy="50" r="${r}" fill="none" stroke="#111" stroke-width="12"
+      stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct / 100)}"
+      transform="rotate(-90 50 50)" stroke-linecap="round"/>
+    <text x="50" y="47" text-anchor="middle" class="pj-donut-n">${done}/${total}</text>
+    <text x="50" y="62" text-anchor="middle" class="pj-donut-l">任务</text></svg>`;
+}
+function pjCalendar(p) {
+  const base = p.deadline ? new Date(p.deadline) : new Date();
+  const y = base.getFullYear(), m = base.getMonth();
+  const first = new Date(y, m, 1).getDay();
+  const days = new Date(y, m + 1, 0).getDate();
+  const today = new Date(); const isThis = today.getFullYear() === y && today.getMonth() === m;
+  const dl = p.deadline ? Number(p.deadline.slice(8, 10)) : -1;
+  let cells = "";
+  for (let i = 0; i < first; i++) cells += `<i class="pj-cal-e"></i>`;
+  for (let d = 1; d <= days; d++) {
+    const cls = [d === dl ? "dl" : "", isThis && d === today.getDate() ? "today" : ""].filter(Boolean).join(" ");
+    cells += `<i class="${cls}">${d}</i>`;
+  }
+  return `<div class="pj-cal"><div class="pj-cal-h">${y} 年 ${m + 1} 月${p.deadline ? ` · 截止 ${p.deadline}` : ""}</div>
+    <div class="pj-cal-w"><i>日</i><i>一</i><i>二</i><i>三</i><i>四</i><i>五</i><i>六</i></div>
+    <div class="pj-cal-g">${cells}</div></div>`;
+}
+function pjRenderDetail(p) {
+  const body = document.getElementById("pjdBody");
+  if (!body || !p) return;
+  document.getElementById("pjdTitle").textContent = p.name;
+  const { done, total } = pjTaskStats(p);
+  const pats = pjPatternsOf(p);
+  const canEdit = pjIsBoss() || p.owner === pjMe();
+  body.innerHTML = `
+    <div class="pjd-card pjd-top">
+      <div class="pjd-top-l">
+        <div class="pj-card-meta">
+          <span class="pj-type ${p.type === "定制" ? "custom" : ""}">${escapeHtml(p.type || "内部")}</span>
+          ${p.customer ? `<span class="pj-cust">${escapeHtml(p.customer)}</span>` : ""}
+          <span class="pj-stagetag">${escapeHtml(p.stage || PJ_STAGES[0].key)}</span>
+        </div>
+        ${pjDueBadge(p)}
+        ${p.desc ? `<p class="pjd-desc">${escapeHtml(p.desc)}</p>` : ""}
+        <div class="pjd-people">
+          <div><span>负责人</span>${pjAvatars([p.owner].filter(Boolean))}</div>
+          <div><span>成员</span>${pjAvatars(p.members || [], 6)}</div>
+        </div>
+      </div>
+      <div class="pjd-top-r">${pjDonut(done, total)}</div>
+    </div>
+
+    <div class="pjd-grid">
+      <div class="pjd-card">
+        <div class="pjd-h">任务清单 ${canEdit ? `<button class="pjd-add" data-pj-addtask type="button">＋ 添加</button>` : ""}</div>
+        <div class="pjd-tasks">${(p.tasks || []).length ? (p.tasks || []).map((t, i) => `
+          <label class="pjd-task ${t.done ? "done" : ""}">
+            <input type="checkbox" data-pj-task="${i}" ${t.done ? "checked" : ""} ${canEdit || t.who === pjMe() ? "" : "disabled"}/>
+            <span class="pjd-task-t">${escapeHtml(t.text)}</span>
+            ${t.who ? pjAvatars([t.who]) : ""}
+            ${canEdit ? `<button class="pjd-task-x" data-pj-deltask="${i}" type="button">×</button>` : ""}
+          </label>`).join("") : `<p class="pjd-empty">还没有任务，点「＋ 添加」建立。</p>`}
+        </div>
+      </div>
+      <div class="pjd-card">${pjCalendar(p)}</div>
+    </div>
+
+    <div class="pjd-card">
+      <div class="pjd-h">项目文件 ${canEdit ? `<label class="pjd-add">＋ 上传资料<input type="file" id="pjFileInput" multiple hidden/></label>` : ""}</div>
+      <div class="pjd-files">${(p.files || []).length ? (p.files || []).map((f, i) => `
+        <div class="pjd-file"><span class="n">${escapeHtml(f.name)}</span><span class="s">${f.size ? (f.size / 1024 / 1024).toFixed(1) + " MB" : ""}</span>
+        <button data-pj-dlfile="${i}" type="button">下载</button></div>`).join("") : `<p class="pjd-empty">还没有客户资料/参考文件。</p>`}
+      </div>
+    </div>
+
+    <div class="pjd-card">
+      <div class="pjd-h">本项目稿件（${pats.length}）
+        ${canEdit && p.stage === "内部定稿" ? `<button class="pjd-add ok" data-pj-publish type="button">定稿发布</button>` : ""}</div>
+      <div class="pjd-pats">${pats.length ? pats.slice(0, 12).map((c) => `
+        <div class="pjd-pat" style="${c.dataset.imageData ? `background-image:url('${c.dataset.imageData}')` : ""}" title="${escapeHtml(c.dataset.file)}"></div>`).join("")
+        : `<p class="pjd-empty">设计师/手绘师上传稿件时选择本项目，就会出现在这里。</p>`}
+      </div>
+      ${p.published ? `<p class="pjd-note">已发布：${p.customer ? `进入「${escapeHtml(p.customer)}」专属可见范围` : "进入公共作品库"}</p>` : ""}
+    </div>
+
+    <div class="pjd-card">
+      <div class="pjd-h">项目动态</div>
+      <div class="pjd-feed">${(p.feed || []).slice(0, 20).map((f) => `
+        <div class="pjd-ev"><i class="pjd-ev-k ${f.kind}"></i>
+        <div><div class="t">${escapeHtml(f.text)}</div><div class="d">${escapeHtml(f.byName || "")} · ${escapeHtml(f.t)}</div></div></div>`).join("") || `<p class="pjd-empty">暂无动态。</p>`}
+      </div>
+    </div>
+
+    ${canEdit ? `<div class="pjd-actions">
+      ${p.stage === "内部定稿" && !p.archived ? `<button class="primary-button" data-pj-complete type="button">✓ 完成项目并归档</button>` : ""}
+      <button class="ghost-button" data-pj-edit type="button">编辑项目</button>
+      ${pjIsBoss() ? `<button class="ghost-button danger" data-pj-del type="button">删除项目</button>` : ""}
+    </div>` : ""}`;
+
+  pjMarkSeen(p);
+  pjBindDetail(p);
+}
+function pjOpenDetail(id) {
+  const p = pjById(id); if (!p) return;
+  pjEnsureDrawer(); pjActiveId = id;
+  pjRenderDetail(p);
+  document.getElementById("pjDrawer").classList.add("open");
+  lockBodyScroll(true);
+  renderProjectsView();
+}
+function pjBindDetail(p) {
+  const body = document.getElementById("pjdBody");
+  body.querySelector("[data-pj-addtask]")?.addEventListener("click", () => {
+    const text = window.prompt("任务内容：", ""); if (!text) return;
+    p.tasks = p.tasks || []; p.tasks.push({ text: text.trim(), done: false, who: "" });
+    pjPush(p, `新增任务：${text.trim()}`); pjSave(); pjRenderDetail(p); renderProjectsView();
+  });
+  body.querySelectorAll("[data-pj-task]").forEach((cb) => cb.addEventListener("change", () => {
+    const i = Number(cb.dataset.pjTask); p.tasks[i].done = cb.checked;
+    pjPush(p, `${cb.checked ? "完成" : "取消"}任务：${p.tasks[i].text}`);
+    pjSave(); pjRenderDetail(p); renderProjectsView();
+  }));
+  body.querySelectorAll("[data-pj-deltask]").forEach((b) => b.addEventListener("click", (e) => {
+    e.preventDefault(); const i = Number(b.dataset.pjDeltask);
+    p.tasks.splice(i, 1); pjSave(); pjRenderDetail(p); renderProjectsView();
+  }));
+  body.querySelector("#pjFileInput")?.addEventListener("change", async (e) => {
+    const fs = [...(e.target.files || [])]; if (!fs.length) return;
+    p.files = p.files || [];
+    for (const f of fs) {
+      const key = `pjfile_${p.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      try { await saveImageToDB(key, await readFileAsDataUrl(f)); } catch {}
+      p.files.push({ name: f.name, size: f.size, key });
+    }
+    pjPush(p, `上传了 ${fs.length} 个项目资料`); pjSave(); pjRenderDetail(p);
+    showToast("资料已上传到项目。", "success");
+  });
+  body.querySelectorAll("[data-pj-dlfile]").forEach((b) => b.addEventListener("click", () => {
+    const f = (p.files || [])[Number(b.dataset.pjDlfile)];
+    if (f?.key) downloadStoredFile(f.key, f.name); else showToast("文件不存在。", "warning");
+  }));
+  body.querySelector("[data-pj-publish]")?.addEventListener("click", () => pjPublish(p));
+  body.querySelector("[data-pj-complete]")?.addEventListener("click", () => {
+    if (!window.confirm(`确认完成并归档项目「${p.name}」？归档后可在「历史项目」查看。`)) return;
+    p.archived = true; p.archivedAt = formatDateTime();
+    pjPush(p, "项目已完成并归档", "ok"); pjSave(); pjCloseDetail(); renderProjectsView();
+    showToast(`项目「${p.name}」已归档。`, "success");
+  });
+  body.querySelector("[data-pj-edit]")?.addEventListener("click", () => pjOpenForm(p));
+  body.querySelector("[data-pj-del]")?.addEventListener("click", () => {
+    if (!window.confirm(`删除项目「${p.name}」？此操作不可恢复。`)) return;
+    pjProjects = pjProjects.filter((x) => x.id !== p.id); pjSave(); pjCloseDetail(); renderProjectsView();
+    showToast("项目已删除。", "success");
+  });
+}
+
+/** 定稿发布：挂客户 → 该客户专属可见；未挂客户 → 进公共作品库 */
+function pjPublish(p) {
+  const pats = pjPatternsOf(p);
+  if (!pats.length) { showToast("本项目还没有关联稿件。", "warning"); return; }
+  pats.forEach((c) => {
+    c.dataset.published = "1";
+    if (p.customer) c.dataset.exclusiveCustomer = p.customer;   // 专属客户，其他客户不可见
+    else delete c.dataset.exclusiveCustomer;
+  });
+  p.published = true; p.publishedAt = formatDateTime();
+  pjPush(p, p.customer ? `定稿发布：${pats.length} 款进入「${p.customer}」专属可见` : `定稿发布：${pats.length} 款进入公共作品库`, "ok");
+  pjSave(); saveStudioState(); pjRenderDetail(p);
+  if (typeof renderLibraryGrid === "function") renderLibraryGrid();
+  showToast("已发布定稿花型。", "success");
+}
+
+/* ---- 新建 / 编辑项目 ---- */
+function pjOpenForm(edit) {
+  const staff = (typeof teamMembers !== "undefined" && Array.isArray(teamMembers)) ? teamMembers : [];
+  const opts = staff.map((m) => `<option value="${escapeHtml(m.key || m.name)}">${escapeHtml(m.name)}（${escapeHtml(m.role || "")}）</option>`).join("");
+  const custs = (typeof customerCenterClients !== "undefined" ? customerCenterClients : []).map((c) => `<option value="${escapeHtml(c.name)}">`).join("");
+  let ov = document.getElementById("pjFormOv");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "pjFormOv";
+    ov.innerHTML = `<div class="pjf-scrim" data-pjf-close></div><div class="pjf-box" id="pjfBox"></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener("click", (e) => { if (e.target.closest("[data-pjf-close]")) { ov.classList.remove("open"); lockBodyScroll(false); } });
+  }
+  const p = edit || {};
+  document.getElementById("pjfBox").innerHTML = `
+    <div class="pjf-head"><h3>${edit ? "编辑项目" : "新建项目"}</h3><button class="pjd-x" data-pjf-close type="button">×</button></div>
+    <div class="pjf-body">
+      <label class="pjf-l">项目名称<input id="pjfName" value="${escapeHtml(p.name || "")}" placeholder="例：南通某中学 秋季校服花型" /></label>
+      <div class="pjf-row">
+        <label class="pjf-l">类型<select id="pjfType">
+          <option value="内部" ${p.type === "内部" || !p.type ? "selected" : ""}>内部系列</option>
+          <option value="定制" ${p.type === "定制" ? "selected" : ""}>客户定制</option></select></label>
+        <label class="pjf-l">截止日期<input id="pjfDl" type="date" value="${escapeHtml(p.deadline || "")}" /></label>
+      </div>
+      <label class="pjf-l" id="pjfCustWrap">客户<input id="pjfCust" list="pjfCustList" value="${escapeHtml(p.customer || "")}" placeholder="选择或输入客户名称" />
+        <datalist id="pjfCustList">${custs}</datalist></label>
+      <label class="pjf-l">项目说明<textarea id="pjfDesc" rows="3" placeholder="需求要点、交付要求等">${escapeHtml(p.desc || "")}</textarea></label>
+      <div class="pjf-row">
+        <label class="pjf-l">负责人<select id="pjfOwner"><option value="">未指定</option>${opts}</select></label>
+        <label class="pjf-l">参与成员（可多选）<select id="pjfMembers" multiple size="4">${opts}</select></label>
+      </div>
+    </div>
+    <div class="pjf-foot"><button class="ghost-button" data-pjf-close type="button">取消</button>
+      <button class="primary-button" id="pjfSave" type="button">${edit ? "保存" : "创建项目"}</button></div>`;
+  if (edit) {
+    const os = document.getElementById("pjfOwner"); if (os) os.value = p.owner || "";
+    const ms = document.getElementById("pjfMembers");
+    [...(ms?.options || [])].forEach((o) => { o.selected = (p.members || []).includes(o.value); });
+  }
+  const syncCust = () => {
+    document.getElementById("pjfCustWrap").style.display =
+      document.getElementById("pjfType").value === "定制" ? "" : "none";
+  };
+  document.getElementById("pjfType").addEventListener("change", syncCust); syncCust();
+  document.getElementById("pjfSave").addEventListener("click", () => {
+    const name = document.getElementById("pjfName").value.trim();
+    if (!name) { showToast("请填写项目名称。", "warning"); return; }
+    const type = document.getElementById("pjfType").value;
+    const data = {
+      name, type,
+      customer: type === "定制" ? document.getElementById("pjfCust").value.trim() : "",
+      deadline: document.getElementById("pjfDl").value,
+      desc: document.getElementById("pjfDesc").value.trim(),
+      owner: document.getElementById("pjfOwner").value,
+      members: [...document.getElementById("pjfMembers").selectedOptions].map((o) => o.value),
+    };
+    if (edit) {
+      Object.assign(edit, data); pjPush(edit, "项目信息已更新");
+    } else {
+      const np = { id: `PJ${Date.now()}`, stage: PJ_STAGES[0].key, createdAt: formatDateTime(), tasks: [], files: [], feed: [], seen: {}, ...data };
+      pjPush(np, "项目已创建", "ok");
+      pjProjects.unshift(np);
+    }
+    pjSave(); ov.classList.remove("open"); lockBodyScroll(false);
+    renderProjectsView();
+    if (pjActiveId) pjRenderDetail(pjById(pjActiveId));
+    showToast(edit ? "项目已更新。" : "项目已创建。", "success");
+  });
+  ov.classList.add("open"); lockBodyScroll(true);
+}
+
+/* ---- 历史项目 ---- */
+function pjOpenArchive() {
+  let ov = document.getElementById("pjArcOv");
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "pjArcOv";
+    ov.innerHTML = `<div class="pjf-scrim" data-pja-close></div><div class="pjf-box wide" id="pjaBox"></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener("click", (e) => {
+      if (e.target.closest("[data-pja-close]")) { ov.classList.remove("open"); lockBodyScroll(false); }
+      const r = e.target.closest("[data-pja-open]");
+      if (r) { ov.classList.remove("open"); lockBodyScroll(false); pjOpenDetail(r.dataset.pjaOpen); }
+    });
+  }
+  const list = pjProjects.filter((p) => p.archived);
+  document.getElementById("pjaBox").innerHTML = `
+    <div class="pjf-head"><h3>历史项目（${list.length}）</h3><button class="pjd-x" data-pja-close type="button">×</button></div>
+    <div class="pjf-body">${list.length ? list.map((p) => `
+      <button class="pja-row" data-pja-open="${escapeHtml(p.id)}" type="button">
+        <span class="pja-n"><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.customer || p.type || "内部")} · 归档于 ${escapeHtml(p.archivedAt || "—")}</small></span>
+        <span class="pja-t">${pjPatternsOf(p).length} 款稿件</span></button>`).join("")
+      : `<p class="pjd-empty">还没有归档的项目。</p>`}</div>`;
+  ov.classList.add("open"); lockBodyScroll(true);
+}
+
+/* ---- 事件绑定 ---- */
+document.querySelector("#pjNew")?.addEventListener("click", () => pjOpenForm(null));
+document.querySelector("#pjOpenArchive")?.addEventListener("click", pjOpenArchive);
+document.querySelectorAll("[data-pj-level]").forEach((b) => b.addEventListener("click", () => {
+  pjLevel = b.dataset.pjLevel;
+  document.querySelectorAll("[data-pj-level]").forEach((x) => x.classList.toggle("on", x === b));
+  renderProjectsView();
+}));
+["#pjTypeFilter", "#pjOwnerFilter"].forEach((s) => document.querySelector(s)?.addEventListener("change", renderProjectsView));
+document.querySelector("#pjSearch")?.addEventListener("input", renderProjectsView);
+
+const pjBoardEl = document.querySelector("#pjBoard");
+pjBoardEl?.addEventListener("click", (e) => {
+  const c = e.target.closest("[data-pj-card]");
+  if (c) { pjOpenDetail(c.dataset.pjCard); return; }
+  const pc = e.target.closest("[data-pj-pattern]");
+  if (pc) { const card = sourceCardByFile(pc.dataset.pjPattern); if (card) openLightbox(card); }
+});
+let pjDragId = null, pjDragFile = null;
+pjBoardEl?.addEventListener("dragstart", (e) => {
+  const c = e.target.closest("[data-pj-card]"); const pc = e.target.closest("[data-pj-pattern]");
+  pjDragId = c?.dataset.pjCard || null; pjDragFile = pc?.dataset.pjPattern || null;
+  if (c || pc) e.dataTransfer.effectAllowed = "move";
+});
+pjBoardEl?.addEventListener("dragover", (e) => {
+  const col = e.target.closest(".pj-col"); if (!col) return;
+  e.preventDefault(); col.classList.add("over");
+});
+pjBoardEl?.addEventListener("dragleave", (e) => e.target.closest(".pj-col")?.classList.remove("over"));
+pjBoardEl?.addEventListener("drop", (e) => {
+  const col = e.target.closest(".pj-col"); if (!col) return;
+  e.preventDefault(); col.classList.remove("over");
+  if (pjDragId) {
+    const to = col.dataset.pjStage; const p = pjById(pjDragId);
+    if (p && to && p.stage !== to) {
+      if (!pjCanDrag(p, to)) { showToast(to === "内部定稿" ? "只有管理员可以将项目推进到内部定稿。" : "你只能移动自己参与的项目。", "warning"); pjDragId = null; return; }
+      p.stage = to; pjPush(p, `阶段推进到「${to}」`, "ok"); pjSave(); renderProjectsView();
+      if (pjActiveId === p.id) pjRenderDetail(p);
+      showToast(`「${p.name}」已进入${to}。`, "success");
+    }
+  } else if (pjDragFile) {
+    const to = col.dataset.pjPstage; const card = sourceCardByFile(pjDragFile);
+    if (card && to) { card.dataset.pjStage = to; saveStudioState(); renderProjectsView(); showToast(`稿件已移动到${to}。`, "success"); }
+  }
+  pjDragId = null; pjDragFile = null;
+});
+
+/** 上传弹窗打开时填充项目下拉（只列进行中的项目） */
+function pjFillUploadSelect() {
+  const sel = document.querySelector("#uploadProjectSelect");
+  if (!sel) return;
+  const keep = sel.value;
+  const list = pjProjects.filter((p) => !p.archived);
+  sel.innerHTML = `<option value="">不关联项目</option>` + list.map((p) =>
+    `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}${p.customer ? `（${escapeHtml(p.customer)}）` : ""}</option>`).join("");
+  if (keep) sel.value = keep;
+}
+
+/** 客户可见性：关联项目且未发布的稿件不进公共池；已发布的定制稿只对该客户可见 */
+function pjVisibleToCustomer(card, company) {
+  const pid = card.dataset.projectId;
+  if (pid) {
+    const p = pjById(pid);
+    if (!p || !p.published) return false;             // 未定稿发布 → 客户看不到
+    const ex = card.dataset.exclusiveCustomer || "";
+    if (ex) return String(ex).trim().toLowerCase() === String(company || "").trim().toLowerCase();
+  }
+  const ex = card.dataset.exclusiveCustomer || "";
+  if (ex) return String(ex).trim().toLowerCase() === String(company || "").trim().toLowerCase();
+  return true;
+}
+
 /* ============ 兼容桩结束 ============ */
 
 const titleMap = {
@@ -2299,6 +2863,9 @@ function switchView(target) {
   if (target === "myOrders") {
     moShown = MO_PAGE_SIZE;
     renderMyOrders();
+  }
+  if (target === "projects") {
+    renderProjectsView();
   }
   if (typeof updateSidebarBadges === "function") updateSidebarBadges();
   if (target === "library") {
@@ -4576,6 +5143,24 @@ function clearStuckOverlays() {
   }
 }
 window.addEventListener("load", () => setTimeout(clearStuckOverlays, 150));
+// 项目数据初始化 + 侧栏红点
+document.addEventListener("DOMContentLoaded", () => {
+  pjLoad();
+  if (typeof renderProjectsView === "function") renderProjectsView();
+  if (typeof updateProjectNavBadge === "function") updateProjectNavBadge();
+});
+function updateProjectNavBadge() {
+  const nav = document.querySelector('.nav-item[data-view="projects"]');
+  if (!nav) return;
+  const n = pjProjects.filter((p) => !p.archived).reduce((s, p) => s + (pjUnreadCount(p) ? 1 : 0), 0);
+  const over = pjProjects.filter((p) => !p.archived && (pjDaysLeft(p) ?? 99) < 0).length;
+  const total = n + over;
+  let d = nav.querySelector(".nav-dot");
+  if (total > 0) {
+    if (!d) { d = document.createElement("span"); d.className = "nav-dot"; nav.appendChild(d); }
+    d.textContent = total > 99 ? "99+" : String(total);
+  } else if (d) d.remove();
+}
 
 /* ============ 侧边栏小圆点通知 ============ */
 function updateSidebarBadges() {
@@ -6228,6 +6813,7 @@ function openUploadModal() {
   uploadValidationTarget = null;
   renderUploadTags();
   renderProjectResults("");
+  if (typeof pjFillUploadSelect === "function") pjFillUploadSelect();
   uploadModal.classList.add("active");
   uploadModal.setAttribute("aria-hidden", "false");
   lockBodyScroll(true);
@@ -9255,6 +9841,19 @@ uploadConfirm.addEventListener("click", async () => {
       sourceFiles: JSON.stringify(storedSourceFiles),
     });
     card.dataset.version = nowText;
+    // 关联项目（选填）：关联后归入项目、暂不进公共作品库
+    const pjSel = document.querySelector("#uploadProjectSelect");
+    const pjId = pjSel?.value || "";
+    if (pjId) {
+      const proj = pjById(pjId);
+      card.dataset.projectId = pjId;
+      card.dataset.pjStage = "每日新稿";
+      if (proj) {
+        pjPush(proj, `${currentAccount.name || "成员"} 上传了稿件：${baseName}`, "new");
+        pjSave();
+        if (typeof updateProjectNavBadge === "function") updateProjectNavBadge();
+      }
+    }
     refreshWorkCards();
     saveStudioState();
     configureWorksView(roleSelect.value, currentAccount.ownerKey);
@@ -10135,7 +10734,9 @@ function syncVlibGallerySelection(grid) {
 function renderVlibGallery(reset = false) {
   const grid = document.querySelector("#vlibGallery");
   if (!grid) return;
-  const cards = vlibFilteredCards();
+  // 客户可见性：未发布的项目稿不进公共池；定制稿只对该客户可见
+  const _pjCompany = viewerSession?.companyName || currentAccount.company || "";
+  const cards = vlibFilteredCards().filter((c) => pjVisibleToCustomer(c, _pjCompany));
   const lockedBySales = exclusivelySoldFiles();
   const signature = cards.map((card) => card.dataset.file).join("|");
   const needsReset = reset || grid.dataset.renderSignature !== signature;
