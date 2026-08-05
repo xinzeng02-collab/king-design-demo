@@ -13419,7 +13419,7 @@ passwordRecoveryModal.addEventListener("click", (event) => {
   if (event.target === passwordRecoveryModal) setAuthModal(passwordRecoveryModal, false);
 });
 
-accountApplicationForm.addEventListener("submit", (event) => {
+accountApplicationForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const username = applicationUsername.value.trim().toLowerCase();
   const contact = applicationContact.value.trim().toLowerCase();
@@ -13441,6 +13441,45 @@ accountApplicationForm.addEventListener("submit", (event) => {
   }
   if (password.length < 8 || password !== applicationPasswordConfirm.value) {
     applicationError.textContent = password.length < 8 ? "密码至少需要 8 位。" : "两次输入的密码不一致。";
+    return;
+  }
+
+  if (window.KingCloud) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) {
+      applicationError.textContent = "请输入可用的邮箱地址。";
+      return;
+    }
+    const submit = accountApplicationForm.querySelector('button[type="submit"]');
+    if (submit) submit.disabled = true;
+    applicationError.textContent = "";
+    try {
+      const cloud = await window.KingCloud.signup(contact, password, applicationName.value.trim() || username);
+      const account = {
+        email: contact,
+        contact,
+        role: CLOUD_ROLE_LABELS[cloud.profile.role] || "设计师",
+        name: cloud.profile.display_name || applicationName.value.trim() || username,
+        ownerKey: username,
+        cloudUserId: cloud.user.id,
+      };
+      const registeredAccounts = readRegisteredAccounts();
+      registeredAccounts[username] = account;
+      writeRegisteredAccounts(registeredAccounts);
+      demoAccounts[username] = account;
+      syncRegisteredAccountsToTeam();
+      syncProjectMemberOptions();
+      accountApplicationForm.reset();
+      setAuthModal(accountApplicationModal, false);
+      applyLogin(username, account);
+      showToast("测试账号已注册并进入工作台。", "success");
+    } catch (error) {
+      const message = String(error?.message || "");
+      applicationError.textContent = /already registered|already been registered/i.test(message)
+        ? "该邮箱已注册，请直接登录。"
+        : `注册失败${message ? `：${message}` : "，请稍后重试。"}`;
+    } finally {
+      if (submit) submit.disabled = false;
+    }
     return;
   }
 

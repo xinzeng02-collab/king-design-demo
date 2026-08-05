@@ -9,10 +9,31 @@
   async function login(email, password) {
     const { data, error } = await client.auth.signInWithPassword({ email, password });
     if (error) throw error;
-    const { data: profile, error: profileError } = await client
-      .from("profiles").select("id, role, display_name").eq("id", data.user.id).single();
+    let profile;
+    let profileError;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const result = await client
+        .from("profiles").select("id, role, display_name").eq("id", data.user.id).single();
+      profile = result.data;
+      profileError = result.error;
+      if (!profileError) break;
+      await new Promise((resolve) => setTimeout(resolve, 180 * (attempt + 1)));
+    }
     if (profileError) throw profileError;
     return { user: data.user, profile };
+  }
+
+  async function signup(email, password, displayName) {
+    const { data, error } = await client.auth.signUp({
+      email,
+      password,
+      options: { data: { display_name: displayName } },
+    });
+    if (error) throw error;
+    if (!data.user) throw new Error("注册未返回用户信息");
+    // The database trigger creates the profile. Sign in once explicitly so
+    // the caller always receives the same shape as a normal login.
+    return login(email, password);
   }
 
   async function listWorks() {
@@ -54,5 +75,5 @@
       .subscribe();
   }
 
-  window.KingCloud = { client, login, listWorks, uploadWork, createPreviewUrl, subscribeWorks };
+  window.KingCloud = { client, login, signup, listWorks, uploadWork, createPreviewUrl, subscribeWorks };
 })();
