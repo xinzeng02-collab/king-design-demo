@@ -22033,8 +22033,10 @@ async function renderCloudWork(record) {
     existing.dataset.cloudStatus = record.status || "";
     const title = existing.querySelector(".work-head strong");
     if (title && record.title) title.textContent = record.title;
-    const image = existing.querySelector("img");
-    if (imageData && image) image.src = imageData;
+    // A Realtime INSERT arrives while the file is still uploading, so there
+    // may be no preview element yet. On the later ready UPDATE, create and
+    // load the preview instead of only trying to update an existing <img>.
+    if (imageData) applyImageData(existing, imageData, { syncReview: false });
     refreshWorkCards();
     renderDailyReviewBoard();
     renderLibraryGrid();
