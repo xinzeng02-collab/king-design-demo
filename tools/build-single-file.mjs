@@ -33,12 +33,12 @@ let html = htmlSource
   .replace('<link rel="stylesheet" href="./gallery-performance.css?v=20260727-performance-v2" />', inlineStyle(galleryStyles))
   .replace('<link rel="stylesheet" href="./tdesign-strict.css?v=20260802-compare-image-v74" />', inlineStyle(strictStyles))
   .replaceAll("./assets/public-demo-cover.svg", heroUrl)
-  .replace('<script src="./release-config.js"></script>', inlineScript(config))
-  .replace('<script src="./cloud-adapter.js"></script>', inlineScript(cloudAdapter))
+  .replace(/<script src="\.\/release-config\.js[^\"]*"><\/script>/, inlineScript(config))
+  .replace(/<script src="\.\/cloud-adapter\.js[^\"]*"><\/script>/, inlineScript(cloudAdapter))
   .replace('<script src="./assets/king-cases/manifest.js"></script>', inlineScript(manifest))
   .replace('<script src="./storage-engine.js?v=20260802-image-reset-v2"></script>', inlineScript(storage))
   .replace('<script src="./performance-runtime.js?v=20260727-performance-v2"></script>', inlineScript(performance))
   .replace('<script src="./login-portals.js?v=20260726-login-v2"></script>', inlineScript(login))
-  .replace('<script src="./script.js"></script>', inlineScript(script));
+  .replace(/<script src="\.\/script\.js[^\"]*"><\/script>/, inlineScript(script));
 
 await writeFile(output, html);
