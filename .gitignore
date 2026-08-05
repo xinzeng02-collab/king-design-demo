@@ -1,0 +1,28 @@
+# Dependencies and generated files
+node_modules/
+.DS_Store
+
+# Secrets and local databases
+.env
+.env.*
+!.env.example
+data/
+*.sqlite
+*.sqlite-*
+
+# Never publish company artworks, uploads, exports, or deployment materials
+assets/king-cases/**
+!assets/king-cases/manifest.js
+!assets/king-cases/manifest.json
+uploads/
+storage/
+exports/
+*.psd
+*.psb
+*.ai
+*.eps
+
+# Internal deployment and payment materials
+local-server/
+payment-backend/
+desktop-test/

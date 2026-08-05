@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="Abstract textile pattern sample">
+  <rect width="1600" height="900" fill="#ebe8df"/>
+  <g fill="none" stroke="#1e3834" stroke-width="12" opacity=".9">
+    <path d="M-80 180C140 40 300 330 520 180s380-10 600 130 380-10 600-150"/>
+    <path d="M-120 430c210-150 400 130 620 0s380 10 600 150 380-10 620-150"/>
+    <path d="M-80 700c220-140 380 150 600 10s400-20 610 120 360 10 570-110"/>
+  </g>
+  <g fill="#d66e4a" opacity=".88">
+    <circle cx="280" cy="182" r="54"/><circle cx="764" cy="312" r="72"/><circle cx="1260" cy="168" r="46"/>
+    <circle cx="140" cy="700" r="50"/><circle cx="1110" cy="676" r="64"/><circle cx="1450" cy="510" r="56"/>
+  </g>
+  <g fill="#d2a840" opacity=".9"><path d="M460 545l84-84 84 84-84 84z"/><path d="M920 680l72-72 72 72-72 72z"/></g>
+  <text x="88" y="825" fill="#1e3834" font-family="Arial, sans-serif" font-size="26" letter-spacing="5">PUBLIC DEMO / NO CLIENT ARTWORK</text>
+</svg>
