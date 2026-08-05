@@ -9,14 +9,15 @@ const read = (file) => readFile(resolve(root, file), "utf8");
 const inlineScript = (text) => `<script>\n${text.replace(/<\/script/gi, "<\\/script")}\n</script>`;
 const inlineStyle = (text) => `<style>\n${text}\n</style>`;
 
-const [htmlSource, hero, styles, loginStyles, galleryStyles, strictStyles, config, cloudAdapter, manifest, storage, performance, login, script] = await Promise.all([
-  read("index.html"),
+const [htmlSource, hero, styles, loginStyles, galleryStyles, strictStyles, config, supabase, cloudAdapter, manifest, storage, performance, login, script] = await Promise.all([
+  read("index.source.html"),
   read("assets/public-demo-cover.svg"),
   read("styles.css"),
   read("login-experience.css"),
   read("gallery-performance.css"),
   read("tdesign-strict.css"),
   read("release-config.js"),
+  read("vendor/supabase.min.js"),
   read("cloud-adapter.js"),
   read("assets/king-cases/manifest.js"),
   read("storage-engine.js"),
@@ -34,6 +35,7 @@ let html = htmlSource
   .replace('<link rel="stylesheet" href="./tdesign-strict.css?v=20260802-compare-image-v74" />', inlineStyle(strictStyles))
   .replaceAll("./assets/public-demo-cover.svg", heroUrl)
   .replace(/<script src="\.\/release-config\.js[^\"]*"><\/script>/, inlineScript(config))
+  .replace('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>', inlineScript(supabase))
   .replace(/<script src="\.\/cloud-adapter\.js[^\"]*"><\/script>/, inlineScript(cloudAdapter))
   .replace('<script src="./assets/king-cases/manifest.js"></script>', inlineScript(manifest))
   .replace('<script src="./storage-engine.js?v=20260802-image-reset-v2"></script>', inlineScript(storage))
