@@ -10,4 +10,8 @@ window.KING_RELEASE_CONFIG = Object.freeze({
   showClientReviewEntry: false,
   enableCustomerPayments: false,
   paymentMode: "disabled",
+  supabase: {
+    url: "https://pplvtjddgxzmbppxoajl.supabase.co",
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBwbHZ0amRkZ3h6bWJwcHhvYWpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5NTIxMzgsImV4cCI6MjEwMTUyODEzOH0.vLxVWTJFS_VU56Og74nK1C_R-1lqGalZCxmIbeEoSn0",
+  },
 });

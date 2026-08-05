@@ -2290,10 +2290,10 @@ if (RELEASE_CONFIG.seedDemoData === false) {
   }
 }
 const demoAccounts = {
-  admin: { password: "admin123", role: "管理员", name: "管理员 / 总控", ownerKey: "admin" },
-  designer: { password: "designer123", role: "设计师", name: "设计师", ownerKey: "designer" },
-  painter: { password: "painter123", role: "手绘师", name: "手绘师", ownerKey: "painter" },
-  sales: { password: "sales123", role: "销售", name: "销售", ownerKey: "sales" },
+  admin: { email: "xinzeng02@gmail.com", password: "admin123", role: "管理员", name: "管理员 / 总控", ownerKey: "admin" },
+  designer: { email: "xinzeng02+designer@gmail.com", password: "designer123", role: "设计师", name: "设计师", ownerKey: "designer" },
+  painter: { email: "xinzeng02+painter@gmail.com", password: "painter123", role: "手绘师", name: "手绘师", ownerKey: "painter" },
+  sales: { email: "xinzeng02+sales@gmail.com", password: "sales123", role: "销售", name: "销售", ownerKey: "sales" },
 };
 const AUTH_SESSION_KEY = "king_backend_auth_session_v1";
 const BACKEND_STUDIO_SYNC_KEY = "king_backend_studio_sync_v1";
@@ -2306,6 +2306,64 @@ let nasSyncPollTimer = null;
 let backendRealtimeSocket = null;
 let backendRealtimeReconnectTimer = null;
 const backendRealtimeSeen = new Set();
+let cloudRealtimeChannel = null;
+const CLOUD_ROLE_LABELS = { admin: "管理员", designer: "设计师", painter: "手绘师", sales: "销售" };
+
+async function renderCloudWork(record) {
+  if (!record?.id) return;
+  const existing = document.querySelector(`[data-cloud-id="${CSS.escape(record.id)}"]`);
+  let imageData = "";
+  try { imageData = await window.KingCloud?.createPreviewUrl(record.storage_key); } catch {}
+  if (existing) {
+    existing.dataset.cloudStatus = record.status || "";
+    const title = existing.querySelector(".work-head strong");
+    if (title && record.title) title.textContent = record.title;
+    const image = existing.querySelector("img");
+    if (imageData && image) image.src = imageData;
+    refreshWorkCards();
+    renderDailyReviewBoard();
+    renderLibraryGrid();
+    return existing;
+  }
+  const card = createWorkCard({
+    file: `cloud-${record.id.slice(0, 8)}`,
+    role: "设计师",
+    owner: record.owner_id,
+    generated: true,
+    version: new Date(record.created_at).toLocaleString("zh-CN"),
+    colors: 1,
+    tags: "",
+    imageKey: imageData,
+    imageData,
+    title: record.title,
+    project: "云端测试",
+    reviewStatus: record.status === "ready" ? "待审核 / 管理者未评审" : record.status,
+    reviewState: "pending",
+    createdAt: record.created_at,
+  });
+  card.dataset.cloudId = record.id;
+  card.dataset.cloudStatus = record.status || "";
+  refreshWorkCards();
+  sortWorkCards();
+  renderDailyReviewBoard();
+  renderLibraryGrid();
+  return card;
+}
+
+async function startCloudRealtimeSync() {
+  if (!window.KingCloud || cloudRealtimeChannel) return;
+  const works = await window.KingCloud.listWorks();
+  for (const work of works) await renderCloudWork(work);
+  cloudRealtimeChannel = window.KingCloud.subscribeWorks((payload) => {
+    if (payload.eventType === "DELETE" && payload.old?.id) {
+      document.querySelector(`[data-cloud-id="${CSS.escape(payload.old.id)}"]`)?.remove();
+      refreshWorkCards();
+      renderLibraryGrid();
+      return;
+    }
+    if (payload.new) renderCloudWork(payload.new).catch(console.warn);
+  });
+}
 
 function backendAuthSession() {
   try { return JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY) || "null"); } catch { return null; }
@@ -12990,6 +13048,7 @@ function applyLogin(accountKey, account) {
         startBackendStudioPolling();
         startBackendRealtimeSync();
         startNasStudioPolling();
+        startCloudRealtimeSync().catch((error) => showToast(`云端同步连接失败：${error.message}`, "error"));
       }), remaining);
     });
   });
@@ -13435,9 +13494,22 @@ loginForm.addEventListener("submit", async (event) => {
   loginError.textContent = "";
   window.KingLoginPortal?.setSubmitting("employee", true);
   try {
-    const account = RELEASE_CONFIG.useBackendAuth
-      ? await authenticateEmployee(accountKey, passwordInput.value)
-      : demoAccounts[accountKey]?.password === passwordInput.value ? demoAccounts[accountKey] : null;
+    let account;
+    if (window.KingCloud) {
+      const configured = demoAccounts[accountKey];
+      if (!configured?.email) throw Object.assign(new Error("INVALID_CREDENTIALS"), { code: "INVALID_CREDENTIALS" });
+      const cloud = await window.KingCloud.login(configured.email, passwordInput.value);
+      account = {
+        ...configured,
+        role: CLOUD_ROLE_LABELS[cloud.profile.role] || configured.role,
+        name: cloud.profile.display_name || configured.name,
+        cloudUserId: cloud.user.id,
+      };
+    } else {
+      account = RELEASE_CONFIG.useBackendAuth
+        ? await authenticateEmployee(accountKey, passwordInput.value)
+        : demoAccounts[accountKey]?.password === passwordInput.value ? demoAccounts[accountKey] : null;
+    }
     if (!account) throw Object.assign(new Error("INVALID_CREDENTIALS"), { code: "INVALID_CREDENTIALS" });
     if (account.accountStatus === "已停用") throw Object.assign(new Error("ACCOUNT_DISABLED"), { code: "ACCOUNT_DISABLED" });
     if (!RELEASE_CONFIG.enabledEmployeeRoles?.includes(account.role)) throw Object.assign(new Error("ROLE_NOT_ENABLED"), { code: "ROLE_NOT_ENABLED" });
@@ -15907,6 +15979,9 @@ uploadConfirm.addEventListener("click", async () => {
       throw new Error("No image files selected");
     }
     const mainFile = files.find((file, index) => uploadPurpose(file, selectedUploadFiles.indexOf(file)) === "主图") || files[0];
+    const cloudWork = window.KingCloud
+      ? await window.KingCloud.uploadWork({ title: workName, file: mainFile })
+      : null;
     const baseName = fileBaseName(uploadDisplayName(mainFile));
     const linkedPainterText = selectedPainterWorks.length
       ? selectedPainterWorks.map((item) => `${item.painter} / ${item.file}`).join("、")
@@ -16019,6 +16094,12 @@ uploadConfirm.addEventListener("click", async () => {
       projectId: uploadProjectId,
       createdAt: editTarget?.dataset.createdAt || nowText,
     });
+    if (cloudWork?.id) {
+      const cloudPlaceholder = document.querySelector(`[data-cloud-id="${CSS.escape(cloudWork.id)}"]`);
+      if (cloudPlaceholder && cloudPlaceholder !== card) cloudPlaceholder.remove();
+      card.dataset.cloudId = cloudWork.id;
+      card.dataset.cloudStatus = cloudWork.status || "ready";
+    }
     card.dataset.version = nowText;
     // 关联项目（选填）：关联后归入项目、暂不进公共作品库
     const pjId = uploadProjectId;
@@ -16791,6 +16872,11 @@ logoutButton.addEventListener("click", () => {
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(SESSION_ACCOUNT_DATA_KEY);
   sessionStorage.removeItem(AUTH_SESSION_KEY);
+  window.KingCloud?.client.auth.signOut().catch(() => {});
+  if (cloudRealtimeChannel) {
+    window.KingCloud?.client.removeChannel(cloudRealtimeChannel);
+    cloudRealtimeChannel = null;
+  }
   appShell.classList.add("locked");
   loginScreen.classList.remove("hidden");
   roleSelect.disabled = false;
