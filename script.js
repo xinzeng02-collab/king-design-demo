@@ -2321,7 +2321,10 @@ async function renderCloudWork(record) {
     // A Realtime INSERT arrives while the file is still uploading, so there
     // may be no preview element yet. On the later ready UPDATE, create and
     // load the preview instead of only trying to update an existing <img>.
-    if (imageData) applyImageData(existing, imageData, { syncReview: false });
+    if (imageData) {
+      applyImageData(existing, imageData, { syncReview: false });
+      prepareWorkCardPreview(existing, { eager: true });
+    }
     refreshWorkCards();
     renderDailyReviewBoard();
     renderLibraryGrid();
@@ -2345,6 +2348,7 @@ async function renderCloudWork(record) {
   });
   card.dataset.cloudId = record.id;
   card.dataset.cloudStatus = record.status || "";
+  if (imageData) prepareWorkCardPreview(card, { eager: true });
   refreshWorkCards();
   sortWorkCards();
   renderDailyReviewBoard();
