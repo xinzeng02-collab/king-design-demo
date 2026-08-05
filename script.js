@@ -15988,6 +15988,21 @@ uploadConfirm.addEventListener("click", async () => {
     const cloudWork = window.KingCloud
       ? await window.KingCloud.uploadWork({ title: workName, file: mainFile })
       : null;
+    // Cloud mode already owns the original file and its preview. Do not also
+    // generate several legacy IndexedDB derivatives on the phone; that extra
+    // work made a completed upload appear to take much longer than it did.
+    if (cloudWork) {
+      await renderCloudWork(cloudWork);
+      refreshWorkCards();
+      sortWorkCards();
+      renderDailyReviewBoard();
+      renderLibraryGrid();
+      uploadConfirm.textContent = "确认上传";
+      uploadConfirm.disabled = false;
+      closeUploadModal();
+      showToast(`已上传「${workName}」，其他在线成员会自动看到。`, "success");
+      return;
+    }
     const baseName = fileBaseName(uploadDisplayName(mainFile));
     const linkedPainterText = selectedPainterWorks.length
       ? selectedPainterWorks.map((item) => `${item.painter} / ${item.file}`).join("、")
