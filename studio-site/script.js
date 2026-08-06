@@ -2501,7 +2501,7 @@ async function deprovisionBackendEmployeeAccount({ username }) {
   });
 }
 
-async function uploadBackendStudioAsset(key, imageData) {
+async function uploadBackendStudioAsset(key, imageData, { onProgress } = {}) {
   const ticket = await backendStudioAsset(key, { method: "POST", action: "sign-upload", headers: { "content-type": "application/json" } });
   const { signedUrl } = await ticket.json();
   if (!signedUrl) throw Object.assign(new Error("STUDIO_ASSET_SIGN_FAILED"), { code: "STUDIO_ASSET_SIGN_FAILED" });
@@ -2512,9 +2512,10 @@ async function uploadBackendStudioAsset(key, imageData) {
     request.setRequestHeader("content-type", imageData?.type || "application/octet-stream");
     request.setRequestHeader("x-upsert", "true");
     request.upload.onprogress = (event) => {
-      if (!event.lengthComputable || !appLoadingText) return;
+      if (!event.lengthComputable) return;
       const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
-      appLoadingText.textContent = `正在上传 ${imageData?.name || "图片"}（${percent}%）`;
+      if (typeof onProgress === "function") onProgress(event.loaded, event.total);
+      else if (appLoadingText) appLoadingText.textContent = `正在上传 ${imageData?.name || "图片"}（${percent}%）`;
     };
     request.onload = () => request.status >= 200 && request.status < 300
       ? resolve()
@@ -2929,6 +2930,11 @@ const clientRememberPassword = document.querySelector("#clientRememberPassword")
 const clientLoginError = document.querySelector("#clientLoginError");
 const appLoadingOverlay = document.querySelector("#appLoadingOverlay");
 const appLoadingText = document.querySelector("#appLoadingText");
+const appLoadingProgress = document.querySelector("#appLoadingProgress");
+const appLoadingProgressTrack = appLoadingProgress?.querySelector('[role="progressbar"]');
+const appLoadingProgressBar = document.querySelector("#appLoadingProgressBar");
+const appLoadingProgressDetail = document.querySelector("#appLoadingProgressDetail");
+const appLoadingProgressCount = document.querySelector("#appLoadingProgressCount");
 const openAccountApplication = document.querySelector("#openAccountApplication");
 const accountApplicationModal = document.querySelector("#accountApplicationModal");
 const closeAccountApplication = document.querySelector("#closeAccountApplication");
@@ -3174,6 +3180,7 @@ const roleDashboards = document.querySelectorAll("[data-role-dashboard]");
 let workCards = document.querySelectorAll("[data-work-role]");
 const worksTitle = document.querySelector("#worksTitle");
 const worksTypeSegment = document.querySelector("#worksTypeSegment");
+const worksUploadButton = document.querySelector("#worksUploadButton");
 const workSort = document.querySelector("#workSort");
 const workTimeFilter = document.querySelector("#workTimeFilter");
 const toggleCardInfo = document.querySelector("#toggleCardInfo");
@@ -3910,6 +3917,28 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results;
 }
 
+function createUploadProgressTracker(plans) {
+  const weights = plans.map((plan) => Math.max(1, Number(plan.file?.size || 1)));
+  const progress = plans.map(() => 0);
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  const render = (detail) => {
+    const weighted = progress.reduce((sum, value, index) => sum + value * weights[index], 0) / totalWeight;
+    const percent = Math.min(92, Math.max(2, Math.round(weighted * 92)));
+    const completed = progress.filter((value) => value >= 1).length;
+    setAppLoadingProgress(percent, detail || `已完成 ${completed}/${plans.length} 个文件`);
+  };
+  return {
+    update(index, fraction, fileName = "") {
+      progress[index] = Math.max(progress[index], Math.min(0.9, Number(fraction || 0) * 0.9));
+      render(fileName ? `${fileName} · ${progress.filter((value) => value >= 1).length}/${plans.length}` : "");
+    },
+    complete(index, fileName = "") {
+      progress[index] = 1;
+      render(fileName ? `${fileName} 已上传 · ${progress.filter((value) => value >= 1).length}/${plans.length}` : "");
+    },
+  };
+}
+
 async function createImageVariantBlob(file, maxSize, square = false, quality = 0.84) {
   const bitmap = await createImageBitmap(file);
   try {
@@ -3945,11 +3974,11 @@ async function createImageVariantBlob(file, maxSize, square = false, quality = 0
   }
 }
 
-async function persistArtworkImageTiers(baseKey, file) {
+async function persistArtworkImageTiers(baseKey, file, { onProgress } = {}) {
   const originalKey = `${baseKey}__original`;
   const thumbKey = `${baseKey}__thumb`;
   // 原图始终按 File 原字节上传；缩略图只服务列表，详情与下载不使用它。
-  const originalUpload = saveImageToDB(originalKey, file);
+  const originalUpload = saveImageToDB(originalKey, file, { onProgress });
   try {
     const thumbBlob = await createImageVariantBlob(file, 960, false, 0.88);
     const thumbFile = new File([thumbBlob], `${fileBaseName(file.name || baseKey)}-thumb.webp`, {
@@ -3983,7 +4012,7 @@ function openImageDB() {
   });
 }
 
-async function saveImageToDB(key, imageData, { waitForLocalCache = false } = {}) {
+async function saveImageToDB(key, imageData, { waitForLocalCache = false, onProgress } = {}) {
   if (!imageData) return;
   const cacheWrite = window.KingBlobStore?.put
     ? window.KingBlobStore.put(key, imageData, {
@@ -4002,7 +4031,7 @@ async function saveImageToDB(key, imageData, { waitForLocalCache = false } = {})
       })();
   // 云端模式中，图片必须在作品元数据保存前进入 R2；本地 IndexedDB 只作缓存。
   if (RELEASE_CONFIG.useBackendAuth) {
-    const upload = uploadBackendStudioAsset(key, imageData);
+    const upload = uploadBackendStudioAsset(key, imageData, { onProgress });
     if (waitForLocalCache) {
       await Promise.all([upload, cacheWrite]);
     } else {
@@ -4240,15 +4269,22 @@ function loadStudioState() {
         ? studioState.personalWorkArchives
         : {};
       if (Array.isArray(studioState.teamMembers) && studioState.teamMembers.length) {
-        // 过滤掉 zx 测试账号，并按 ownerKey/姓名去重，避免重复累积。
+        // 正式版只移除已知演示成员，保留管理员后来创建的真实云端员工。
         const seen = new Set();
-        const seededKeys = new Set(seededTeamMembers.map((member) => member.ownerKey));
-        const cleaned = studioState.teamMembers.filter((member) => {
+        const productionAccountKeys = new Set(Object.keys(demoAccounts));
+        const demoOnlyKeys = new Set(seededTeamMembers
+          .map((member) => member.ownerKey)
+          .filter((ownerKey) => !productionAccountKeys.has(ownerKey)));
+        const cleaned = studioState.teamMembers.map((member) => {
+          if (RELEASE_CONFIG.seedDemoData !== false) return member;
+          if (member.ownerKey === "designer" && member.name === "许然") return { ...member, name: "设计师" };
+          if (member.ownerKey === "painter" && member.name === "阿沁") return { ...member, name: "手绘师" };
+          return member;
+        }).filter((member) => {
           const key = String(member.ownerKey || member.name || "").toLowerCase();
           const name = String(member.name || "").toLowerCase();
           if (key === "zx" || name === "zx") return false;
-          if (RELEASE_CONFIG.seedDemoData === false && key !== "admin" && name !== "管理员") return false;
-          if (RELEASE_CONFIG.seedDemoData === false && seededKeys.has(member.ownerKey)) return false;
+          if (RELEASE_CONFIG.seedDemoData === false && demoOnlyKeys.has(member.ownerKey)) return false;
           const dedupeKey = member.ownerKey || member.name;
           if (seen.has(dedupeKey)) return false;
           seen.add(dedupeKey);
@@ -4324,6 +4360,8 @@ function flushStudioState() {
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushStudioState(); });
 window.addEventListener("pagehide", flushStudioState);
 window.addEventListener("beforeunload", flushStudioState);
+window.addEventListener("pagehide", flushOrderPriceStateSave);
+window.addEventListener("beforeunload", flushOrderPriceStateSave);
 
 function saveStudioStateNow() {
   let previousState = {};
@@ -5993,6 +6031,7 @@ function employeeJoinedAt(member) {
 }
 
 function openTeamMemberDetail(memberKey) {
+  if (currentAccount.role !== "管理员") return;
   const member = teamMembers.find((item) => item.ownerKey === memberKey);
   if (!member) return;
   const account = readRegisteredAccounts()[member.ownerKey] || demoAccounts[member.ownerKey] || {};
@@ -6392,6 +6431,11 @@ function deferHiddenWorkPreviewCleanup(cards) {
 }
 
 function switchView(target) {
+  const targetNav = [...navItems].find((item) => item.dataset.view === target);
+  if (targetNav && !viewAllowedForRole(targetNav, currentAccount.role)) {
+    showToast("当前账号没有访问该页面的权限。", "warning");
+    return false;
+  }
   navItems.forEach((navItem) => navItem.classList.toggle("active", navItem.dataset.view === target));
   const actualTarget = target === "adminWorks" ? "designer" : target;
   views.forEach((view) => view.classList.toggle("active", view.id === actualTarget));
@@ -6526,6 +6570,10 @@ function configureRoleNavigation(role) {
   quickUpload?.classList.toggle("hidden", role === "销售");
   const quickUploadTitle = quickUpload?.querySelector("strong");
   if (quickUploadTitle) quickUploadTitle.textContent = role === "手绘师" ? "上传手绘稿" : "上传设计稿";
+  const canUploadWork = ["管理员", "设计师", "手绘师"].includes(role);
+  worksUploadButton?.classList.toggle("hidden", !canUploadWork);
+  const worksUploadLabel = worksUploadButton?.querySelector("span");
+  if (worksUploadLabel) worksUploadLabel.textContent = role === "手绘师" ? "上传手绘稿" : "上传设计稿";
   quickCreateGrid?.querySelector('[data-quick-action="project"]')?.classList.toggle("hidden", !canCreateProject());
   quickCreateGrid?.querySelectorAll('[data-quick-action="customer"], [data-quick-action="order"]')
     .forEach((button) => button.classList.toggle("hidden", !canCreateCustomerOrOrder()));
@@ -6831,7 +6879,11 @@ function setBadgeText(card, prefix, value, className) {
 }
 
 function workOwnerName(card) {
-  const ownerNames = {
+  const ownerKey = card?.dataset?.workOwner || "";
+  const teamName = teamMembers.find((member) => member.ownerKey === ownerKey)?.name;
+  if (teamName) return teamName;
+  if (ownerKey && currentAccount?.ownerKey === ownerKey) return currentAccount.name || currentAccount.username || ownerKey;
+  const legacyOwnerNames = RELEASE_CONFIG.seedDemoData === false ? {} : {
     designer: "许然",
     linruo: "林若",
     mengxia: "孟夏",
@@ -6841,7 +6893,7 @@ function workOwnerName(card) {
     suye: "苏叶",
     sampler: "陈一",
   };
-  return teamMembers.find((member) => member.ownerKey === card.dataset.workOwner)?.name || ownerNames[card.dataset.workOwner] || card.dataset.workOwner || "-";
+  return legacyOwnerNames[ownerKey] || ownerKey || "-";
 }
 
 function workRoleName(card) {
@@ -6873,7 +6925,9 @@ function painterWorkCatalog() {
 }
 
 function workOwnerKeyByName(name) {
-  const ownerKeys = {
+  const member = teamMembers.find((item) => item.name === name);
+  if (member?.ownerKey) return member.ownerKey;
+  const legacyOwnerKeys = RELEASE_CONFIG.seedDemoData === false ? {} : {
     许然: "designer",
     林若: "linruo",
     孟夏: "mengxia",
@@ -6883,7 +6937,7 @@ function workOwnerKeyByName(name) {
     苏叶: "suye",
     陈一: "sampler",
   };
-  return ownerKeys[name] || "";
+  return legacyOwnerKeys[name] || "";
 }
 
 function cardTagsText(card) {
@@ -8432,7 +8486,7 @@ function orderParticipantKeys(sourceCards) {
       designers.add(card.dataset.workOwner);
     }
     const linkedPainter = fieldValue(card, "引用手绘");
-    ["许然", "林若", "阿沁", "陈一"].forEach((name) => {
+    teamMembers.filter((member) => member.role === "手绘师").map((member) => member.name).forEach((name) => {
       if (!linkedPainter.includes(name)) return;
       const key = workOwnerKeyByName(name);
       if (key) painters.add(key);
@@ -8645,6 +8699,37 @@ function renderCustomerGroups(orders) {
 
 function orderDeliverStatus(order) {
   return order.deliverStatus || (orderProgressStatus(order) === "已完成" ? "已交付" : "未交付");
+}
+
+let orderPriceSaveTimer = null;
+function queueOrderPriceStateSave() {
+  if (orderPriceSaveTimer) clearTimeout(orderPriceSaveTimer);
+  orderPriceSaveTimer = window.setTimeout(() => {
+    orderPriceSaveTimer = null;
+    saveStudioState();
+  }, 350);
+}
+
+function flushOrderPriceStateSave() {
+  if (!orderPriceSaveTimer) return;
+  clearTimeout(orderPriceSaveTimer);
+  orderPriceSaveTimer = null;
+  saveStudioState();
+}
+
+function syncOrderPriceControls(order, sourceInput) {
+  const orderCard = sourceInput?.closest("[data-order-card]");
+  if (!orderCard) return;
+  const totalInput = orderCard.querySelector("[data-order-price-input]");
+  if (totalInput) {
+    totalInput.value = order.price == null ? "" : Number(order.price.toFixed(2));
+    totalInput.closest(".oc-price-input")?.classList.toggle("todo", order.price == null);
+  }
+  orderCard.querySelectorAll("[data-order-pattern-price]").forEach((input) => {
+    const { file } = parseOrderPatternControl(input.dataset.orderPatternPrice);
+    const value = orderPatternPriceValue(order, file);
+    input.value = value == null ? "" : Number(value.toFixed(2));
+  });
 }
 
 function orderPatternList(order) {
@@ -8925,7 +9010,8 @@ function saveOrderPriceInput(input) {
   }
   order.priceManuallySet = true;
   logOrderEvent(order, `订单金额更新为 ¥${value.toLocaleString("zh-CN")}`, currentAccount.role || "员工");
-  saveStudioState();
+  syncOrderPriceControls(order, input);
+  queueOrderPriceStateSave();
   showToast(`Update：订单金额已更新为 ¥${value.toLocaleString("zh-CN")}`, "success");
 }
 
@@ -8955,8 +9041,8 @@ function saveOrderPatternPriceInput(input) {
   order.price = sumMoney(orderPatternList(order).map((pattern) => prices[pattern]));
   order.priceManuallySet = true;
   logOrderEvent(order, `${file} 金额更新为 ¥${value.toLocaleString("zh-CN")}`, currentAccount.role || "员工");
-  saveStudioState();
-  renderOrderCenter();
+  syncOrderPriceControls(order, input);
+  queueOrderPriceStateSave();
   showToast(`${file} 的金额已更新，订单总额已重新计算。`, "success");
 }
 
@@ -10883,6 +10969,8 @@ function renderLightbox() {
   lightboxDeleteWork.classList.toggle("hidden", recycleDetailContext || !(adminReviewContext || metadataContext || uploaderContext));
   lightboxOwner.textContent = `${workRoleName(card)}：${workOwnerName(card)}`;
   lightboxOwner.dataset.memberName = workOwnerName(card);
+  lightboxOwner.disabled = currentAccount.role !== "管理员";
+  lightboxOwner.title = currentAccount.role === "管理员" ? "查看成员档案" : "";
   lightboxOwner.classList.toggle("hidden", customerContext);
   if (lightboxSubmissionMeta) {
     const batchDate = reviewDisplayDate(card);
@@ -13251,9 +13339,19 @@ function switchLoginPortal(portal) {
   (clientMode ? clientUsername : usernameInput).focus();
 }
 
-function showAppLoading(message = "正在加载…") {
+function setAppLoadingProgress(value, detail = "") {
+  const percent = Math.min(100, Math.max(0, Math.round(Number(value || 0))));
+  if (appLoadingProgressBar) appLoadingProgressBar.style.width = `${percent}%`;
+  if (appLoadingProgressTrack) appLoadingProgressTrack.setAttribute("aria-valuenow", String(percent));
+  if (appLoadingProgressCount) appLoadingProgressCount.textContent = `${percent}%`;
+  if (appLoadingProgressDetail && detail) appLoadingProgressDetail.textContent = detail;
+}
+
+function showAppLoading(message = "正在加载…", { progress = false } = {}) {
   if (!appLoadingOverlay) return;
   if (appLoadingText) appLoadingText.textContent = message;
+  if (appLoadingProgress) appLoadingProgress.hidden = !progress;
+  if (progress) setAppLoadingProgress(0, "正在准备文件…");
   appLoadingOverlay.classList.remove("hidden");
   appLoadingOverlay.setAttribute("aria-hidden", "false");
 }
@@ -13262,6 +13360,8 @@ function hideAppLoading() {
   if (!appLoadingOverlay) return;
   appLoadingOverlay.classList.add("hidden");
   appLoadingOverlay.setAttribute("aria-hidden", "true");
+  if (appLoadingProgress) appLoadingProgress.hidden = true;
+  setAppLoadingProgress(0, "正在准备文件…");
 }
 
 function waitForUiPaint() {
@@ -13853,6 +13953,7 @@ document.querySelectorAll(".preview-trigger").forEach((trigger) => {
 
 lightboxClose.addEventListener("click", closeLightbox);
 lightboxOwner?.addEventListener("click", () => {
+  if (currentAccount.role !== "管理员") return;
   const memberName = lightboxOwner.dataset.memberName || "";
   const member = teamMembers.find((item) => item.name === memberName || item.ownerKey === memberName);
   if (!member) {
@@ -15866,6 +15967,7 @@ addReferenceInput.addEventListener("change", async () => {
 document.querySelectorAll(".open-upload").forEach((button) => {
   button.addEventListener("click", () => openUploadModal());
 });
+worksUploadButton?.addEventListener("click", () => openUploadModal());
 chooseFiles.addEventListener("click", () => {
   pendingUploadPurpose = "";
   artworkFiles.click();
@@ -16350,13 +16452,27 @@ uploadConfirm.addEventListener("click", async () => {
         key: `${fileId}__source_${sourceIndex + 1}_${uploadStartedAt}`,
       })),
     ];
-    const uploadedFiles = await mapWithConcurrency(uploadPlans, 3, async (plan) => {
+    const uploadProgress = createUploadProgressTracker(uploadPlans);
+    showAppLoading(`正在上传 ${uploadPlans.length} 个文件`, { progress: true });
+    setAppLoadingProgress(2, `准备上传 · 0/${uploadPlans.length}`);
+    await waitForUiPaint();
+    const uploadedFiles = await mapWithConcurrency(uploadPlans, 3, async (plan, planIndex) => {
+      const updateProgress = (loaded, total) => uploadProgress.update(
+        planIndex,
+        total > 0 ? loaded / total : 0,
+        uploadDisplayName(plan.file),
+      );
+      let uploaded;
       if (plan.kind === "work" || plan.kind === "palette") {
-        return { ...plan, tiers: await persistArtworkImageTiers(plan.baseKey, plan.file) };
+        uploaded = { ...plan, tiers: await persistArtworkImageTiers(plan.baseKey, plan.file, { onProgress: updateProgress }) };
+      } else {
+        await saveImageToDB(plan.key, plan.file, { onProgress: updateProgress });
+        uploaded = plan;
       }
-      await saveImageToDB(plan.key, plan.file);
-      return plan;
+      uploadProgress.complete(planIndex, uploadDisplayName(plan.file));
+      return uploaded;
     });
+    setAppLoadingProgress(94, "正在生成预览并整理稿件信息…");
     const workUploads = uploadedFiles.filter((item) => item.kind === "work");
     const mainTiers = workUploads.find((item) => item.file === mainFile)?.tiers;
     if (!mainTiers) throw new Error("Main artwork upload missing");
@@ -16456,7 +16572,9 @@ uploadConfirm.addEventListener("click", async () => {
       });
     }
     refreshWorkCards();
+    setAppLoadingProgress(97, "正在同步到云端工作台…");
     await saveStudioStateToCloud();
+    setAppLoadingProgress(100, "上传完成，正在打开稿件…");
     configureWorksView(roleSelect.value, currentAccount.ownerKey);
     sortWorkCards();
     renderRecycleBin();
@@ -16478,8 +16596,11 @@ uploadConfirm.addEventListener("click", async () => {
     // 上传失败时也必须释放全屏弹层，否则它会继续拦截工作台的所有输入。
     closeUploadModal();
     const errorText = String(error?.message || error || "");
-    const storageMessage = /NAS_|EACCES|EPERM|ENOENT|network|access|quota|存储|写入/i.test(errorText)
-      ? "NAS 文件写入失败，请检查连接与 files 文件夹权限。"
+    const storageFailure = /NAS_|EACCES|EPERM|ENOENT|network|access|quota|存储|写入|UPLOAD|STORAGE/i.test(errorText);
+    const storageMessage = storageFailure
+      ? RELEASE_CONFIG.useBackendAuth
+        ? "云端文件上传失败，请检查网络后重试；已选择的原图不会被压缩。"
+        : "NAS 文件写入失败，请检查连接与 files 文件夹权限。"
       : `图片处理失败${errorText ? `：${errorText}` : "，请重新选择图片再试。"}`;
     showToast(storageMessage, "error");
   } finally {

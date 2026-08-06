@@ -294,7 +294,7 @@
           <button class="profile-avatar" id="profileAvatar" type="button" aria-label="更换头像">许</button>
           <input class="visually-hidden" id="profileAvatarInput" type="file" accept="image/*" />
           <label>
-            <strong id="profileNameInput">许然</strong>
+            <strong id="profileNameInput">员工</strong>
             <span class="profile-role-label" id="profileRoleLabel">designer Designer</span>
           </label>
           <button class="sidebar-logout" id="logoutButton" type="button" aria-label="退出登录"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M23.9917 6H6V42H24"></path><path d="M33 33L42 24L33 15"></path><path d="M16 23.9917H42"></path></svg></button>
@@ -537,6 +537,10 @@
                 </div>
               </div>
             </div>
+            <button class="works-upload-button hidden" id="worksUploadButton" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-4 4 4-4 4 4M5 14v5h14v-5"></path></svg>
+              <span>上传稿件</span>
+            </button>
             <div class="library-manage-actions hidden" id="libraryManageActions">
               <button class="library-manage-secondary" id="libraryManageSelectAll" type="button">全选</button>
               <button class="library-manage-danger" id="libraryManageDelete" type="button" disabled>删除</button>
@@ -917,7 +921,7 @@
             </div>
           </div>
           <button class="lightbox-cart-button" id="addToCartFromLightbox" type="button">加入选稿车</button>
-          <button class="lightbox-owner" id="lightboxOwner" type="button">设计师：许然</button>
+          <button class="lightbox-owner" id="lightboxOwner" type="button">设计师：未记录</button>
           <p class="lightbox-submission-meta" id="lightboxSubmissionMeta"></p>
           <p class="lightbox-project" id="lightboxProject" data-edit-kind="project">项目：未关联</p>
           <div class="lightbox-project-picker hidden" id="lightboxProjectPicker">
@@ -1417,6 +1421,12 @@
       <div class="app-loading-card">
         <div class="app-loading-bounce" aria-hidden="true"><i></i><i></i></div>
         <strong id="appLoadingText">正在加载…</strong>
+        <div class="app-loading-progress" id="appLoadingProgress" hidden>
+          <div class="app-loading-progress-track" role="progressbar" aria-label="文件上传进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <i id="appLoadingProgressBar"></i>
+          </div>
+          <div class="app-loading-progress-meta"><span id="appLoadingProgressDetail">正在准备文件…</span><b id="appLoadingProgressCount">0%</b></div>
+        </div>
       </div>
     </div>
 
@@ -1432,6 +1442,6 @@
     <script src="./performance-runtime.js?v=20260727-performance-v2"></script>
     <script src="./login-portals.js?v=20260807-login-recovery-v1"></script>
     <script src="/socket.io/socket.io.js"></script>
-  <script src="./script.js?v=20260807-employee-auth-v4"></script>
+  <script src="./script.js?v=20260807-ux-performance-v5"></script>
   </body>
 </html>

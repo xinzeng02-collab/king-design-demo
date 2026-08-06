@@ -235,8 +235,8 @@ test("上传使用 Blob 存储，并保留源文件缺失提示", async () => {
   const styles = await read("styles.css");
   assert.match(script, /KingBlobStore/);
   assert.match(script, /mapWithConcurrency\(uploadPlans, 3/);
-  assert.match(script, /saveImageToDB\(originalKey, file\)/);
-  assert.match(script, /saveImageToDB\(plan\.key, plan\.file\)/);
+  assert.match(script, /saveImageToDB\(originalKey, file, \{ onProgress \}\)/);
+  assert.match(script, /saveImageToDB\(plan\.key, plan\.file, \{ onProgress: updateProgress \}\)/);
   assert.match(script, /MAX_IMAGE_FILE_BYTES = 100 \* 1024 \* 1024/);
   assert.match(script, /return \{ originalKey, thumbKey, previewKey: originalKey \}/);
   assert.match(script, /workImages: JSON\.stringify\(workImages\)/);
@@ -258,7 +258,7 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-employee-auth-v4/);
+  assert.match(html, /script\.js\?v=20260807-ux-performance-v5/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
@@ -271,6 +271,44 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   assert.match(script, /function deprovisionBackendEmployeeAccount/);
   assert.match(script, /action=deprovision-employee/);
   assert.match(script, /await deprovisionBackendEmployeeAccount\(\{ username: member\.ownerKey \}\)/);
+});
+
+test("正式版不泄漏演示设计师身份，成员档案只对管理员开放", async () => {
+  const html = await read("index.html");
+  const script = await read("script.js");
+
+  assert.doesNotMatch(html, /id="profileNameInput">许然/);
+  assert.doesNotMatch(html, /id="lightboxOwner"[^>]*>设计师：许然/);
+  assert.match(script, /const legacyOwnerNames = RELEASE_CONFIG\.seedDemoData === false \? \{\} : \{/);
+  assert.match(script, /if \(currentAccount\.role !== "管理员"\) return;[\s\S]*?lightboxOwner\.dataset\.memberName/);
+  assert.match(script, /function openTeamMemberDetail\(memberKey\) \{\s*if \(currentAccount\.role !== "管理员"\) return;/);
+  assert.match(script, /if \(targetNav && !viewAllowedForRole\(targetNav, currentAccount\.role\)\)/);
+  assert.match(script, /const demoOnlyKeys = new Set/);
+  assert.doesNotMatch(script, /key !== "admin" && name !== "管理员"/);
+});
+
+test("订单逐稿定价局部更新并合并保存，输入时不重绘整张订单", async () => {
+  const script = await read("script.js");
+  const saver = script.match(/function saveOrderPatternPriceInput\(input\) \{[\s\S]*?\n\}/)?.[0] || "";
+
+  assert.match(script, /function queueOrderPriceStateSave\(\)/);
+  assert.match(script, /function syncOrderPriceControls\(order, sourceInput\)/);
+  assert.match(saver, /syncOrderPriceControls\(order, input\)/);
+  assert.match(saver, /queueOrderPriceStateSave\(\)/);
+  assert.doesNotMatch(saver, /renderOrderCenter\(\)/);
+});
+
+test("设计师和手绘师有直达上传入口，并显示真实云端上传进度", async () => {
+  const html = await read("index.html");
+  const script = await read("script.js");
+
+  assert.match(html, /id="worksUploadButton"/);
+  assert.match(html, /id="appLoadingProgress"[\s\S]*?role="progressbar"/);
+  assert.match(script, /worksUploadButton\?\.addEventListener\("click", \(\) => openUploadModal\(\)\)/);
+  assert.match(script, /function createUploadProgressTracker\(plans\)/);
+  assert.match(script, /request\.upload\.onprogress/);
+  assert.match(script, /persistArtworkImageTiers\(plan\.baseKey, plan\.file, \{ onProgress: updateProgress \}\)/);
+  assert.match(script, /setAppLoadingProgress\(100, "上传完成，正在打开稿件…"\)/);
 });
 
 test("客户、员工、订单、作品及评审关系都进入云端状态模块", async () => {
