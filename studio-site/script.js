@@ -2329,11 +2329,23 @@ function backendAuthSession() {
 }
 
 async function authenticateEmployee(username, password) {
-  const response = await fetch(`${String(RELEASE_CONFIG.apiBaseUrl || "").replace(/\/$/, "")}/api/auth/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username, password }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  let response;
+  try {
+    response = await fetch(`${String(RELEASE_CONFIG.apiBaseUrl || "").replace(/\/$/, "")}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username, password }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    throw Object.assign(new Error(error?.name === "AbortError" ? "LOGIN_TIMEOUT" : "LOGIN_FAILED"), {
+      code: error?.name === "AbortError" ? "LOGIN_TIMEOUT" : "LOGIN_FAILED",
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(result.error || "LOGIN_FAILED");
@@ -2355,14 +2367,26 @@ function writeBackendSyncMeta(record) {
 async function backendApi(path, options = {}) {
   const session = backendAuthSession();
   if (!session?.accessToken) throw Object.assign(new Error("UNAUTHENTICATED"), { code: "UNAUTHENTICATED" });
-  const response = await fetch(`${String(RELEASE_CONFIG.apiBaseUrl || "").replace(/\/$/, "")}${path}`, {
-    ...options,
-    headers: {
-      authorization: `Bearer ${session.accessToken}`,
-      "content-type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  let response;
+  try {
+    response = await fetch(`${String(RELEASE_CONFIG.apiBaseUrl || "").replace(/\/$/, "")}${path}`, {
+      ...options,
+      headers: {
+        authorization: `Bearer ${session.accessToken}`,
+        "content-type": "application/json",
+        ...(options.headers || {}),
+      },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    throw Object.assign(new Error(error?.name === "AbortError" ? "BACKEND_REQUEST_TIMEOUT" : "BACKEND_REQUEST_FAILED"), {
+      code: error?.name === "AbortError" ? "BACKEND_REQUEST_TIMEOUT" : "BACKEND_REQUEST_FAILED",
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(result.error || "BACKEND_REQUEST_FAILED"), {
     code: result.error || "BACKEND_REQUEST_FAILED",
@@ -4789,7 +4813,11 @@ function applyStoredState() {
     try {
       localStorage.setItem(LEGACY_AUTO_PRICE_MIGRATION_KEY, "done");
     } catch {}
-    saveStudioState();
+    // In backend mode the server is authoritative. Before login there is no
+    // authenticated session to sync this migration, so writing defaults here
+    // would make the first login overwrite the cloud snapshot and trigger a
+    // reload loop.
+    if (!RELEASE_CONFIG.useBackendAuth) saveStudioState();
   }
   (studioState.createdWorks || []).forEach((work) => createWorkCard({ ...work, generated: true }));
   refreshWorkCards();
@@ -12523,7 +12551,7 @@ libraryManageSelectAll?.addEventListener("click", () => {
 });
 
 libraryManageDelete?.addEventListener("click", () => {
-  const cards = selectedLibraryManageCards();
+  let cards = selectedLibraryManageCards();
   if (!cards.length || !window.confirm(`确认删除已选中的 ${cards.length} 件作品吗？删除后会进入回收站。`)) return;
   if (isCreatorRole()) {
     cards = cards.filter((card) => card.dataset.workOwner === currentAccount.ownerKey);
