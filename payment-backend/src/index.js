@@ -61,6 +61,8 @@ export default {
       if (pathname.startsWith("/api/") && !identity) return json({ error: "UNAUTHENTICATED" }, 401);
       const repo = new SupabaseRepo(env);
       const actor = await buildActor(repo, identity);
+      if (pathname === "/api/admin/studio-assets" && method === "POST" && url.searchParams.get("action") === "sign-upload")
+        return json(await studioAssets.createStudioAssetUploadUrl(env, actor, url.searchParams.get("key")));
       if (pathname === "/api/admin/studio-assets" && method === "PUT")
         return json(await studioAssets.putStudioAsset(env, actor, url.searchParams.get("key"), request));
       if (pathname === "/api/admin/studio-assets" && method === "DELETE")

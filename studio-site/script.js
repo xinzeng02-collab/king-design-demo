@@ -2374,8 +2374,10 @@ async function backendApi(path, options = {}) {
 async function backendStudioAsset(key, options = {}) {
   const session = backendAuthSession();
   if (!session?.accessToken) throw Object.assign(new Error("UNAUTHENTICATED"), { code: "UNAUTHENTICATED" });
-  const response = await fetch(`${String(RELEASE_CONFIG.apiBaseUrl || "").replace(/\/$/, "")}/api/admin/studio-assets?key=${encodeURIComponent(key)}`, {
-    ...options,
+  const { action, ...fetchOptions } = options;
+  const query = `${action ? `action=${encodeURIComponent(action)}&` : ""}key=${encodeURIComponent(key)}`;
+  const response = await fetch(`${String(RELEASE_CONFIG.apiBaseUrl || "").replace(/\/$/, "")}/api/admin/studio-assets?${query}`, {
+    ...fetchOptions,
     headers: { authorization: `Bearer ${session.accessToken}`, ...(options.headers || {}) },
   });
   if (!response.ok) {
@@ -2383,6 +2385,27 @@ async function backendStudioAsset(key, options = {}) {
     throw Object.assign(new Error(detail.error || "STUDIO_ASSET_REQUEST_FAILED"), { code: detail.error, status: response.status });
   }
   return response;
+}
+
+async function uploadBackendStudioAsset(key, imageData) {
+  const ticket = await backendStudioAsset(key, { method: "POST", action: "sign-upload", headers: { "content-type": "application/json" } });
+  const { signedUrl } = await ticket.json();
+  if (!signedUrl) throw Object.assign(new Error("STUDIO_ASSET_SIGN_FAILED"), { code: "STUDIO_ASSET_SIGN_FAILED" });
+  const response = await fetch(signedUrl, {
+    method: "PUT",
+    headers: {
+      "content-type": imageData?.type || "application/octet-stream",
+      "x-upsert": "true",
+    },
+    body: imageData,
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw Object.assign(new Error(detail.message || detail.error || "STUDIO_ASSET_UPLOAD_FAILED"), {
+      code: detail.error || "STUDIO_ASSET_UPLOAD_FAILED",
+      status: response.status,
+    });
+  }
 }
 
 async function pullBackendStudioState({ reloadWhenChanged = false } = {}) {
@@ -3809,11 +3832,7 @@ async function saveImageToDB(key, imageData) {
   }
   // 云端模式中，图片必须在作品元数据保存前进入 R2；本地 IndexedDB 只作缓存。
   if (RELEASE_CONFIG.useBackendAuth) {
-    await backendStudioAsset(key, {
-      method: "PUT",
-      headers: { "content-type": imageData?.type || "application/octet-stream" },
-      body: imageData,
-    });
+    await uploadBackendStudioAsset(key, imageData);
   }
 }
 

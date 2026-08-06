@@ -75,6 +75,28 @@ export async function putStudioAsset(env, actor, key, request) {
   return { ok: true, key };
 }
 
+export async function createStudioAssetUploadUrl(env, actor, key) {
+  requireStaff(actor);
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) throw fail("STUDIO_ASSET_STORAGE_NOT_CONFIGURED", 503);
+  const objectKey = assetKey(actor, key);
+  const base = String(env.SUPABASE_URL).replace(/\/$/, "");
+  const response = await fetch(`${base}/storage/v1/object/upload/sign/studio-assets/${encodeURIComponent(objectKey)}`, {
+    method: "POST",
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ upsert: true }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.url) throw fail(`SUPABASE_SIGN_UPLOAD_${response.status}`, 502);
+  return {
+    key,
+    signedUrl: result.url.startsWith("http") ? result.url : `${base}/storage/v1${result.url}`,
+  };
+}
+
 export async function getStudioAsset(env, actor, key) {
   requireStaff(actor);
   const object = await bucket(env).get(assetKey(actor, key));
