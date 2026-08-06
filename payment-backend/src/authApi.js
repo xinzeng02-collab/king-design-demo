@@ -94,7 +94,7 @@ export async function refresh(env, { refreshToken }) {
   return { accessToken: session.access_token, refreshToken: session.refresh_token, expiresIn: session.expires_in };
 }
 
-export async function provisionEmployee(repo, env, actor, { username, password, role, name }) {
+export async function provisionEmployee(repo, env, actor, { username, password, role, name, allowExisting = false }) {
   if (!actor?.userId || !["admin", "boss"].includes(actor.role)) throw fail("FORBIDDEN_ADMIN_ONLY", 403);
   const loginName = String(username || "").trim().toLowerCase();
   const backendRole = EMPLOYEE_ROLE_KEYS.get(String(role || "").trim()) || String(role || "").trim();
@@ -106,6 +106,7 @@ export async function provisionEmployee(repo, env, actor, { username, password, 
   const email = `${loginName}@${env.AUTH_EMAIL_DOMAIN || "king-design.local"}`;
   const users = await supabaseAdminRequest(env, "/auth/v1/admin/users?per_page=1000");
   const existing = (users.users || []).find((user) => String(user.email || "").toLowerCase() === email);
+  if (existing && !allowExisting) throw fail("ACCOUNT_ALREADY_EXISTS", 409);
   const userBody = {
     email,
     email_confirm: true,

@@ -2314,7 +2314,6 @@ const demoAccounts = {
 };
 const AUTH_SESSION_KEY = "king_backend_auth_session_v1";
 const BACKEND_STUDIO_SYNC_KEY = "king_backend_studio_sync_v1";
-const BACKEND_LOGIN_RELOAD_KEY = "king_backend_login_reload_v1";
 const NAS_SYNC_TIME_KEY = "king_nas_sync_time_v1";
 let backendSyncQueue = Promise.resolve();
 let backendLastSyncAttempt = Promise.resolve();
@@ -2326,6 +2325,8 @@ let backendRealtimeSocket = null;
 let backendRealtimeReconnectTimer = null;
 const backendRealtimeSeen = new Set();
 let backendAuthRefreshPromise = null;
+let pendingCloudStudioCleanup = false;
+let pendingCloudStudioCleanupPreviousState = null;
 
 function backendAuthSession() {
   try { return JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY) || "null"); } catch { return null; }
@@ -2485,11 +2486,11 @@ async function backendStudioAsset(key, options = {}) {
   return response;
 }
 
-async function provisionBackendEmployeeAccount({ username, password, role, name }) {
+async function provisionBackendEmployeeAccount({ username, password, role, name, allowExisting = false }) {
   if (!RELEASE_CONFIG.useBackendAuth) return null;
   return backendApi("/api/admin/studio-state?action=provision-employee", {
     method: "POST",
-    body: JSON.stringify({ username, password: password || "", role, name }),
+    body: JSON.stringify({ username, password: password || "", role, name, allowExisting }),
   });
 }
 
@@ -2526,18 +2527,166 @@ async function uploadBackendStudioAsset(key, imageData, { onProgress } = {}) {
   });
 }
 
-async function pullBackendStudioState({ reloadWhenChanged = false } = {}) {
-  if (!RELEASE_CONFIG.useBackendAuth || !backendAuthSession()?.accessToken) return false;
-  const record = await backendApi("/api/admin/studio-state");
-  const remoteState = record.state && typeof record.state === "object" ? record.state : {};
-  const remoteJson = JSON.stringify(remoteState);
-  const localJson = localStorage.getItem(STORAGE_KEY) || "";
-  writeBackendSyncMeta({ revision: Number(record.revision || 0), state: remoteState });
-  window.__kingLastBackendRevision = Number(record.revision || 0);
-  if (remoteJson === localJson || (reloadWhenChanged && anyOverlayOpen())) return false;
+async function deleteBackendStudioAsset(key) {
+  if (!RELEASE_CONFIG.useBackendAuth || !key) return;
+  try {
+    await backendStudioAsset(key, { method: "DELETE" });
+  } catch (error) {
+    if (error?.status !== 404) throw error;
+  }
+}
+
+function resetStudioRuntimeBeforeCloudHydration() {
+  // 稿件分页会把未显示节点移动到 parking。云端重新水合时必须同时清掉
+  // 主容器和停放区，否则每恢复一次会话就会再创建一套相同稿件。
+  [...workCards].forEach((card) => card?.remove());
+  worksBoard?.querySelectorAll(".work-card").forEach((card) => card.remove());
+  workCardParking?.querySelectorAll(".work-card").forEach((card) => card.remove());
+  workCards = [];
+  invalidateCardIndex();
+  workRecordCache.clear();
+  dirtyWorkFiles.clear();
+  workRecordCacheReady = false;
+  globalTags.splice(0, globalTags.length);
+  pendingTagApplications.splice(0, pendingTagApplications.length);
+  dismissedNotifications.clear();
+  activityNotifications = [];
+  customProjects = [];
+  customCustomers = [];
+  projectBoardOverrides = {};
+  resourceFolders = [];
+  teamResources = [];
+  teamMembers.splice(0, teamMembers.length);
+  Object.entries(DEFAULT_TAG_CATEGORIES).forEach(([key, values]) => {
+    managedTagCategories[key] = RELEASE_CONFIG.seedDemoData === false ? [] : [...values];
+  });
+  Object.keys(managedTagCategories).forEach((key) => {
+    if (!Object.prototype.hasOwnProperty.call(DEFAULT_TAG_CATEGORIES, key)) delete managedTagCategories[key];
+  });
+  Object.assign(managedTagCategoryLabels, {
+    workType: "作品类型",
+    patternForm: "图案形式",
+    theme: "主题",
+    style: "风格",
+  });
+  studioState = createEmptyStudioState();
+}
+
+function dedupeCreatedWorks(records) {
+  const unique = new Map();
+  (Array.isArray(records) ? records : []).forEach((record) => {
+    const file = String(record?.file || "").trim();
+    if (!file) return;
+    unique.set(file, record);
+  });
+  return [...unique.values()];
+}
+
+function normalizeStudioStateRecords(state) {
+  const normalized = state && typeof state === "object" ? { ...state } : {};
+  const createdWorks = dedupeCreatedWorks(normalized.createdWorks);
+  const changed = createdWorks.length !== (Array.isArray(normalized.createdWorks) ? normalized.createdWorks.length : 0);
+  normalized.createdWorks = createdWorks;
+  return { state: normalized, changed };
+}
+
+function changedStudioModules(localState, remoteState) {
+  return [...new Set([...Object.keys(localState || {}), ...Object.keys(remoteState || {})])]
+    .filter((module) => JSON.stringify(localState?.[module]) !== JSON.stringify(remoteState?.[module]));
+}
+
+function applyLightweightCloudModules(remoteState, changedModules) {
+  studioState = { ...studioState, ...remoteState };
+  if (changedModules.includes("orders")) studioOrders = Array.isArray(remoteState.orders) ? remoteState.orders : [];
+  if (changedModules.includes("resourceFolders")) resourceFolders = Array.isArray(remoteState.resourceFolders) ? remoteState.resourceFolders : [];
+  if (changedModules.includes("resources")) teamResources = Array.isArray(remoteState.resources) ? remoteState.resources : [];
+  if (changedModules.includes("activityNotifications")) {
+    activityNotifications = Array.isArray(remoteState.activityNotifications) ? remoteState.activityNotifications.slice(0, 80) : [];
+  }
+  if (changedModules.includes("dismissedNotifications")) {
+    dismissedNotifications.clear();
+    (remoteState.dismissedNotifications || []).forEach((key) => dismissedNotifications.add(key));
+  }
+  if (changedModules.includes("sharedWorkspaceLocalData")) restoreSharedWorkspaceLocalData(remoteState.sharedWorkspaceLocalData);
+  if (changedModules.includes("personalWorkArchives")) {
+    configureWorksView(roleSelect.value, currentAccount.ownerKey, activeWorksMode);
+    renderSleepList();
+    renderRecycleBin();
+  }
+  if (changedModules.includes("orders") && activeViewId() === "orders") renderOrderCenter();
+  if ((changedModules.includes("resourceFolders") || changedModules.includes("resources")) && activeViewId() === "resources") renderResourceLibrary();
+  renderNotifications();
+  renderDashboardOverview(currentAccount.role);
+  updateSidebarBadges();
+}
+
+function applyCloudStudioState(remoteState, remoteJson, changedModules) {
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
   localStorage.setItem(STORAGE_KEY, remoteJson);
   lastPersistedStateJson = remoteJson;
-  if (reloadWhenChanged) location.reload();
+  const lightweightModules = new Set([
+    "orders", "resourceFolders", "resources", "activityNotifications",
+    "dismissedNotifications", "sharedWorkspaceLocalData", "personalWorkArchives",
+  ]);
+  if (changedModules.length && changedModules.every((module) => lightweightModules.has(module))) {
+    applyLightweightCloudModules(remoteState, changedModules);
+    return;
+  }
+  resetStudioRuntimeBeforeCloudHydration();
+  applyStoredState();
+  syncRegisteredAccountsToTeam();
+  syncProjectMemberOptions();
+  syncCustomerOptions();
+  configureWorksView(roleSelect.value, currentAccount.ownerKey, activeWorksMode);
+  renderSleepList();
+  renderRecycleBin();
+  renderDailyReviewBoard();
+  renderLibraryGrid();
+  renderNotifications();
+  renderDashboardOverview(currentAccount.role);
+  updateSidebarBadges();
+  const activeView = activeViewId();
+  if (activeView === "team") renderTeamView();
+  if (activeView === "projects") renderProjectsView();
+  if (activeView === "orders") renderOrderCenter();
+  if (activeView === "resources") renderResourceLibrary();
+  requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
+}
+
+async function pullBackendStudioState({ refreshUi = false, checkRevision = false, showProgress = false } = {}) {
+  if (!RELEASE_CONFIG.useBackendAuth || !backendAuthSession()?.accessToken) return false;
+  if (showProgress) setAppLoadingProgress(32, "正在检查云端数据版本…");
+  if (checkRevision) {
+    const meta = await backendApi("/api/admin/studio-state?meta=1");
+    const localRevision = Number(window.__kingLastBackendRevision || backendSyncMeta()?.revision || 0);
+    if (Number(meta.revision || 0) === localRevision) return false;
+  }
+  if (showProgress) setAppLoadingProgress(48, "正在读取云端工作室数据…");
+  const record = await backendApi("/api/admin/studio-state");
+  const normalizedRemote = normalizeStudioStateRecords(record.state);
+  const remoteState = normalizedRemote.state;
+  if (normalizedRemote.changed) {
+    pendingCloudStudioCleanup = true;
+    pendingCloudStudioCleanupPreviousState = {
+      createdWorks: Array.isArray(record.state?.createdWorks) ? record.state.createdWorks : [],
+    };
+  }
+  const remoteJson = JSON.stringify(remoteState);
+  const localJson = localStorage.getItem(STORAGE_KEY) || "";
+  let localState = {};
+  try { localState = JSON.parse(localJson || "{}"); } catch {}
+  const changedModules = changedStudioModules(localState, remoteState);
+  writeBackendSyncMeta({ revision: Number(record.revision || 0), state: remoteState });
+  window.__kingLastBackendRevision = Number(record.revision || 0);
+  if (remoteJson === localJson || (refreshUi && anyOverlayOpen())) return false;
+  if (showProgress) setAppLoadingProgress(72, "正在合并云端数据…");
+  if (refreshUi) applyCloudStudioState(remoteState, remoteJson, changedModules);
+  else {
+    localStorage.setItem(STORAGE_KEY, remoteJson);
+    lastPersistedStateJson = remoteJson;
+  }
+  if (showProgress) setAppLoadingProgress(88, "云端数据已同步，正在打开工作台…");
   return true;
 }
 
@@ -2554,17 +2703,23 @@ function backendWritableModules(role) {
 }
 
 function studioRecordIdentity(record) {
+  if (record == null) return "";
+  if (typeof record !== "object") return `${typeof record}:${String(record)}`;
   return record?.id || record?.file || record?.ownerKey || "";
 }
 
-function mergeStudioModule(module, remoteValue, localValue) {
-  // 服务端 revision 冲突后不能拿整块旧缓存覆盖别人刚写的数据。业务数组按
-  // 稳定 id/file 合并；当前操作者改动的同名记录保留本次值，其余记录保留服务端值。
+function mergeStudioModule(module, remoteValue, localValue, previousValue) {
+  // 冲突合并必须同时保留“新增/修改”和“删除”差异，否则远端旧记录会在
+  // 永久删除后被重新并回数组，造成回收站看似清空但刷新后复活。
   if (Array.isArray(remoteValue) && Array.isArray(localValue)) {
+    const localKeys = new Set(localValue.map(studioRecordIdentity).filter(Boolean));
+    const removedKeys = new Set((Array.isArray(previousValue) ? previousValue : [])
+      .map(studioRecordIdentity)
+      .filter((key) => key && !localKeys.has(key)));
     const merged = new Map();
     remoteValue.forEach((record) => {
       const key = studioRecordIdentity(record);
-      if (key) merged.set(key, record);
+      if (key && !removedKeys.has(key)) merged.set(key, record);
     });
     localValue.forEach((record) => {
       const key = studioRecordIdentity(record);
@@ -2572,8 +2727,18 @@ function mergeStudioModule(module, remoteValue, localValue) {
     });
     return [...merged.values()];
   }
-  if (module === "overrides" && remoteValue && localValue && typeof remoteValue === "object" && typeof localValue === "object") {
-    return { ...remoteValue, ...localValue };
+  if (module === "personalWorkArchives" && remoteValue && localValue && typeof remoteValue === "object" && typeof localValue === "object") {
+    return {
+      ...remoteValue,
+      [currentAccount.ownerKey]: localValue[currentAccount.ownerKey] || {},
+    };
+  }
+  if (remoteValue && localValue && typeof remoteValue === "object" && typeof localValue === "object") {
+    const merged = { ...remoteValue };
+    Object.keys(previousValue || {}).forEach((key) => {
+      if (!Object.prototype.hasOwnProperty.call(localValue, key)) delete merged[key];
+    });
+    return { ...merged, ...localValue };
   }
   return localValue;
 }
@@ -2602,7 +2767,7 @@ async function pushBackendStudioModules(previousState, nextState) {
     } catch (error) {
       if (error.status !== 409) throw error;
       await pullBackendStudioState();
-      valueToSend = mergeStudioModule(module, backendSyncMeta()?.state?.[module], valueToSend);
+      valueToSend = mergeStudioModule(module, backendSyncMeta()?.state?.[module], valueToSend, previousState?.[module]);
       saved = await send();
     }
     writeBackendSyncMeta({ revision: Number(saved.revision || 0), state: saved.state || {} });
@@ -2642,6 +2807,16 @@ async function saveStudioStateToCloud() {
   if (RELEASE_CONFIG.useBackendAuth) await backendLastSyncAttempt;
 }
 
+async function cleanupDuplicateCloudStudioRecords() {
+  if (!pendingCloudStudioCleanup || !pendingCloudStudioCleanupPreviousState) return;
+  if (!["管理员", "设计师", "手绘师"].includes(currentAccount.role)) return;
+  const previousState = pendingCloudStudioCleanupPreviousState;
+  const nextState = { createdWorks: dedupeCreatedWorks(studioState.createdWorks) };
+  await pushBackendStudioModules(previousState, nextState);
+  pendingCloudStudioCleanup = false;
+  pendingCloudStudioCleanupPreviousState = null;
+}
+
 const ROUTABLE_VIEWS = new Set(["dashboard", "review", "team", "projects", "designer", "adminWorks", "library", "cart", "orders", "sleep", "recycle", "resources", "myLibrary", "myOrders"]);
 let applyingBrowserRoute = false;
 
@@ -2665,8 +2840,8 @@ function startBackendStudioPolling() {
   if (RELEASE_CONFIG.deployment === "intranet") return;
   if (!RELEASE_CONFIG.useBackendAuth || backendSyncPollTimer) return;
   backendSyncPollTimer = setInterval(() => {
-    backendSyncQueue.then(() => pullBackendStudioState({ reloadWhenChanged: true })).catch(() => {});
-  }, 15000);
+    backendSyncQueue.then(() => pullBackendStudioState({ refreshUi: true, checkRevision: true })).catch(() => {});
+  }, 6000);
 }
 
 function startBackendRealtimeSync() {
@@ -2681,8 +2856,8 @@ function startBackendRealtimeSync() {
       if (backendRealtimeSeen.has(id)) return;
       backendRealtimeSeen.add(id);
       if (backendRealtimeSeen.size > 200) backendRealtimeSeen.delete(backendRealtimeSeen.values().next().value);
-      // State-backed pages reload the authoritative server snapshot. This avoids silent overwrite after reconnect.
-      backendSyncQueue.then(() => pullBackendStudioState({ reloadWhenChanged: true })).catch(() => {});
+      // Reconcile the authoritative snapshot in place so active work is not interrupted.
+      backendSyncQueue.then(() => pullBackendStudioState({ refreshUi: true, checkRevision: true })).catch(() => {});
     });
     backendRealtimeSocket.on("disconnect", () => {
       backendRealtimeSocket = null;
@@ -2705,7 +2880,7 @@ function startNasStudioPolling() {
 function refreshSalesLibrarySharedState() {
   if (currentAccount.role !== "销售" || salesLibraryRefreshPromise || anyOverlayOpen()) return;
   salesLibraryRefreshPromise = RELEASE_CONFIG.useBackendAuth
-    ? pullBackendStudioState({ reloadWhenChanged: true })
+    ? pullBackendStudioState({ refreshUi: true })
     : window.kingNas?.syncRead
       ? window.kingNas.syncRead().then((shared) => applyNasSharedState(shared, { reloadWhenChanged: true }))
       : Promise.resolve(false);
@@ -2788,7 +2963,15 @@ function roleSubtitle(role) {
 function applyProfilePrefs(account) {
   const prefs = readProfilePrefs();
   const profile = prefs[account.ownerKey] || {};
-  const displayName = String(profile.name || account.name || "").split("/")[0].trim();
+  const accountName = String(account.name || account.username || account.ownerKey || "").split("/")[0].trim();
+  const displayName = RELEASE_CONFIG.useBackendAuth
+    ? accountName
+    : String(profile.name || accountName).split("/")[0].trim();
+  if (RELEASE_CONFIG.useBackendAuth && Object.prototype.hasOwnProperty.call(profile, "name")) {
+    const { name: _legacyLocalName, ...cloudProfile } = profile;
+    prefs[account.ownerKey] = cloudProfile;
+    writeProfilePrefs(prefs);
+  }
   currentAccount.name = displayName;
   if (profileNameInput) profileNameInput.textContent = displayName;
   if (profileRoleLabel) profileRoleLabel.textContent = `${account.ownerKey} ${roleSubtitle(account.role)}`;
@@ -3428,25 +3611,28 @@ let resourceFolders = [];
 let teamResources = [];
 let activeResourceFolder = "all";
 let resourceSearchText = "";
-let studioState = {
-  createdWorks: [],
-  overrides: {},
-  removedFiles: [],
-  globalTags: [],
-  orders: [],
-  customers: [],
-  projects: [],
-  projectBoardOverrides: {},
-  teamMembers: [],
-  pendingTags: [],
-  dismissedNotifications: [],
-  resourceFolders: [],
-  resources: [],
-  personalWorkArchives: {},
-  tagCategories: {},
-  tagCategoryLabels: {},
-  activityNotifications: [],
-};
+function createEmptyStudioState() {
+  return {
+    createdWorks: [],
+    overrides: {},
+    removedFiles: [],
+    globalTags: [],
+    orders: [],
+    customers: [],
+    projects: [],
+    projectBoardOverrides: {},
+    teamMembers: [],
+    pendingTags: [],
+    dismissedNotifications: [],
+    resourceFolders: [],
+    resources: [],
+    personalWorkArchives: {},
+    tagCategories: {},
+    tagCategoryLabels: {},
+    activityNotifications: [],
+  };
+}
+let studioState = createEmptyStudioState();
 let lastPersistedStateJson = "";
 const defaultOrders = [];
 const previewTeamMembers = [
@@ -3472,7 +3658,6 @@ const previewTeamMembers = [
   { name: "韩序", role: "管理员", ownerKey: "preview_admin_01", tone: "gray", baseLoadScore: 1, accountStatus: "正常" },
 ];
 const seededTeamMembers = [
-  { name: "许然", role: "设计师", ownerKey: "designer", tone: "blue", baseLoadScore: 2, accountStatus: "正常" },
   { name: "林若", role: "设计师", ownerKey: "linruo", tone: "violet", baseLoadScore: 7, accountStatus: "正常" },
   { name: "孟夏", role: "设计师", ownerKey: "mengxia", tone: "green", baseLoadScore: 14, accountStatus: "正常" },
   { name: "阿沁", role: "手绘师", ownerKey: "painter", tone: "pink", baseLoadScore: 2, accountStatus: "正常" },
@@ -3497,6 +3682,7 @@ function memberAvatarInner(member) {
 
 let teamManageMode = false;
 let editingEmployeeAccountKey = "";
+let employeeAccountSubmitting = false;
 let employeeCreateMode = "single";
 let teamHighLoadOnly = false;
 let teamRankingPage = 0;
@@ -3808,7 +3994,17 @@ function editReviewTags(target) {
 function refreshWorkCards() {
   const connectedCards = [...document.querySelectorAll("[data-work-role]")];
   const knownCards = [...workCards].filter((card) => card?.isConnected && card.matches?.("[data-work-role]"));
-  workCards = [...new Set([...knownCards, ...connectedCards])];
+  const uniqueCards = new Map();
+  [...new Set([...knownCards, ...connectedCards])].forEach((card) => {
+    const file = String(card.dataset.file || "").trim();
+    if (!file) return;
+    if (uniqueCards.has(file)) {
+      card.remove();
+      return;
+    }
+    uniqueCards.set(file, card);
+  });
+  workCards = [...uniqueCards.values()];
   invalidateCardIndex();
 }
 
@@ -4215,7 +4411,8 @@ function loadStudioState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       lastPersistedStateJson = raw;
-      studioState = { ...studioState, ...JSON.parse(raw) };
+      const normalizedStored = normalizeStudioStateRecords(JSON.parse(raw));
+      studioState = { ...studioState, ...normalizedStored.state };
       restoreSharedWorkspaceLocalData(studioState.sharedWorkspaceLocalData);
       (RELEASE_CONFIG.seedDemoData === false ? [] : (studioState.globalTags || []).filter((tag) => !retiredDefaultTags.includes(tag))).forEach((tag) => {
         if (!globalTags.includes(tag)) globalTags.push(tag);
@@ -4277,7 +4474,7 @@ function loadStudioState() {
           .filter((ownerKey) => !productionAccountKeys.has(ownerKey)));
         const cleaned = studioState.teamMembers.map((member) => {
           if (RELEASE_CONFIG.seedDemoData !== false) return member;
-          if (member.ownerKey === "designer" && member.name === "许然") return { ...member, name: "设计师" };
+          if (member.ownerKey === "designer") return { ...member, name: "设计师" };
           if (member.ownerKey === "painter" && member.name === "阿沁") return { ...member, name: "手绘师" };
           return member;
         }).filter((member) => {
@@ -5011,7 +5208,12 @@ function applyStoredState() {
     // reload loop.
     if (!RELEASE_CONFIG.useBackendAuth) saveStudioState();
   }
-  (studioState.createdWorks || []).forEach((work) => createWorkCard({ ...work, generated: true }));
+  const existingWorkFiles = new Set([...workCards].map((card) => card.dataset.file));
+  (studioState.createdWorks || []).forEach((work) => {
+    if (!work?.file || existingWorkFiles.has(work.file)) return;
+    createWorkCard({ ...work, generated: true });
+    existingWorkFiles.add(work.file);
+  });
   refreshWorkCards();
 
   workCards.forEach((card) => {
@@ -5922,13 +6124,35 @@ function persistEmployeeAccount(member, patch = {}) {
   return account;
 }
 
-function closeEmployeeAccountModal() {
+function closeEmployeeAccountModal({ force = false } = {}) {
+  if (employeeAccountSubmitting && !force) return;
   employeeAccountModal?.classList.remove("active");
   employeeAccountModal?.setAttribute("aria-hidden", "true");
   employeeAccountForm?.reset();
   editingEmployeeAccountKey = "";
   employeeAccountSubmit.dataset.results = "";
+  employeeAccountModal?.removeAttribute("aria-busy");
   lockBodyScroll(false);
+}
+
+function employeeCloudErrorMessage(error, action = "保存") {
+  const messages = {
+    ACCOUNT_ALREADY_EXISTS: "该登录账号已存在，请更换一个账号。",
+    PASSWORD_TOO_SHORT: "登录密码至少需要 8 位。",
+    INVALID_USERNAME: "登录账号需为 3-24 位英文、数字、点、下划线或短横线。",
+    INVALID_EMPLOYEE_ROLE: "请选择有效的员工岗位。",
+    FORBIDDEN_ADMIN_ONLY: "当前账号没有管理员权限，请重新登录管理员账号。",
+    AUTH_NOT_CONFIGURED: "云端认证服务尚未配置，请检查 Vercel 环境变量。",
+  };
+  return messages[error?.code] || `云端账号${action}失败，请稍后重试。`;
+}
+
+function setEmployeeAccountSubmitting(active) {
+  employeeAccountSubmitting = active;
+  if (employeeAccountSubmit) employeeAccountSubmit.disabled = active;
+  if (employeeAccountCancel) employeeAccountCancel.disabled = active;
+  if (employeeAccountClose) employeeAccountClose.disabled = active;
+  employeeAccountModal?.toggleAttribute("aria-busy", active);
 }
 
 async function copyTextToClipboard(value, message = "已复制。") {
@@ -6011,7 +6235,7 @@ function openEmployeeAccountModal(member = null) {
   employeeBatchList.innerHTML = "";
   employeeAccountName.value = member?.name || "";
   employeeAccountUsername.value = member?.ownerKey || "";
-  employeeAccountUsername.readOnly = false;
+  employeeAccountUsername.readOnly = Boolean(member);
   employeeAccountJoinedAt.value = member ? employeeJoinedAt(member) : formatDateTime();
   employeeAccountRole.value = member?.role || "";
   employeeAccountPassword.required = !member;
@@ -6565,7 +6789,10 @@ function configureRoleNavigation(role) {
   topCartButton?.classList.toggle("hidden", !["管理员", "销售"].includes(role));
   tagManagerButton?.classList.toggle("hidden", !canManageTags());
   quickCreateButton?.classList.toggle("hidden", role === "客户");
-  document.querySelector("#topStartReview")?.classList.toggle("hidden", !["管理员", "销售"].includes(role));
+  const canStartReview = ["管理员", "销售"].includes(role);
+  const topStartReview = document.querySelector("#topStartReview");
+  topStartReview?.classList.toggle("hidden", !canStartReview);
+  topStartReview?.toggleAttribute("hidden", !canStartReview);
   const quickUpload = quickCreateGrid?.querySelector('[data-quick-action="design"]');
   quickUpload?.classList.toggle("hidden", role === "销售");
   const quickUploadTitle = quickUpload?.querySelector("strong");
@@ -6884,7 +7111,6 @@ function workOwnerName(card) {
   if (teamName) return teamName;
   if (ownerKey && currentAccount?.ownerKey === ownerKey) return currentAccount.name || currentAccount.username || ownerKey;
   const legacyOwnerNames = RELEASE_CONFIG.seedDemoData === false ? {} : {
-    designer: "许然",
     linruo: "林若",
     mengxia: "孟夏",
     painter: "阿沁",
@@ -6928,7 +7154,6 @@ function workOwnerKeyByName(name) {
   const member = teamMembers.find((item) => item.name === name);
   if (member?.ownerKey) return member.ownerKey;
   const legacyOwnerKeys = RELEASE_CONFIG.seedDemoData === false ? {} : {
-    许然: "designer",
     林若: "linruo",
     孟夏: "mengxia",
     阿沁: "painter",
@@ -9784,7 +10009,18 @@ function updateSidebarBadges() {
       d.textContent = count > 99 ? "99+" : String(count);
     } else if (d) d.remove();
   };
+  const statusDot = (viewName, active, label) => {
+    const nav = document.querySelector(`.nav-item[data-view="${viewName}"]`);
+    if (!nav) return;
+    nav.classList.toggle("has-status-dot", Boolean(active));
+    if (active) nav.dataset.statusLabel = label;
+    else delete nav.dataset.statusLabel;
+  };
   const mine = studioOrders.filter(orderBelongsToCurrentAccount);
+  const pendingReviewCount = currentAccount.role === "管理员"
+    ? reviewItems().filter(isReviewPending).length
+    : 0;
+  statusDot("review", pendingReviewCount > 0, `${pendingReviewCount} 件稿件待评审`);
   if (currentAccount.role === "客户") {
     const todo = mine.filter((o) => moStage(o) === "paying").length;
     dot("myOrders", todo);
@@ -10231,6 +10467,7 @@ function renderDailyReviewBoard() {
     : `<p class="empty-state review-empty-state">无</p>`;
   hydrateLazyKeyImages(reviewBoard);
   observeGalleryAutoLoad(reviewBoard);
+  updateSidebarBadges();
 }
 
 function lightboxImageFitScale() {
@@ -12750,7 +12987,24 @@ function updateCardReviewStatus(card, value) {
   markWorkRecordDirty(card);
 }
 
-function setWorkSleeping(card, sleeping, { silent = false } = {}) {
+async function setWorkSleeping(card, sleeping, { silent = false } = {}) {
+  if (isCreatorRole()) {
+    if (card.dataset.workOwner !== currentAccount.ownerKey) return;
+    if (sleeping) ensureArchivePreviewPersisted(card);
+    setPersonalArchiveState(card, "sleep", sleeping);
+    if (!silent) {
+      renderSleepList();
+      renderRecycleBin();
+      configureWorksView(roleSelect.value, currentAccount.ownerKey);
+      try {
+        await saveStudioStateToCloud();
+        showToast(sleeping ? `${card.dataset.file} 已移入休眠区。` : `${card.dataset.file} 已取消休眠。`, "success");
+      } catch {
+        showToast("休眠状态已在本页更新，但云端同步失败，请保持页面并重试。", "error");
+      }
+    }
+    return;
+  }
   if (currentAccount.role !== "管理员") return;
   if (sleeping) ensureArchivePreviewPersisted(card);
   card.classList.toggle("sleeping", sleeping);
@@ -12791,12 +13045,20 @@ function setWorkSleeping(card, sleeping, { silent = false } = {}) {
     renderSleepList();
     renderDailyReviewBoard();
     sortWorkCards();
-    saveStudioState();
-    showToast(sleeping ? `${card.dataset.file} 已移入休眠区。` : `${card.dataset.file} 已取消休眠并恢复到原状态。`, "success");
+    try {
+      await saveStudioStateToCloud();
+      showToast(sleeping ? `${card.dataset.file} 已移入休眠区。` : `${card.dataset.file} 已取消休眠并恢复到原状态。`, "success");
+    } catch {
+      showToast("休眠状态已在本页更新，但云端同步失败，请保持页面并重试。", "error");
+    }
   }
 }
 
 function setWorkSleepingForBatch(card) {
+  if (isCreatorRole()) {
+    setWorkSleeping(card, true, { silent: true });
+    return;
+  }
   if (currentAccount.role !== "管理员") return;
   card.classList.add("sleeping");
   card.dataset.sleeping = "true";
@@ -12831,39 +13093,61 @@ libraryManageSelectAll?.addEventListener("click", () => {
   renderLibraryManageState();
 });
 
-libraryManageDelete?.addEventListener("click", () => {
+libraryManageDelete?.addEventListener("click", async () => {
   let cards = selectedLibraryManageCards();
   if (!cards.length || !window.confirm(`确认删除已选中的 ${cards.length} 件作品吗？删除后会进入回收站。`)) return;
   if (isCreatorRole()) {
     cards = cards.filter((card) => card.dataset.workOwner === currentAccount.ownerKey);
   }
   if (!cards.length || !["管理员", "设计师", "手绘师"].includes(currentAccount.role)) return;
+  if (isCreatorRole()) {
+    cards.forEach((card) => setPersonalArchiveState(card, "delete", true));
+    libraryManageSelection.clear();
+    renderRecycleBin();
+    renderSleepList();
+    configureWorksView(roleSelect.value, currentAccount.ownerKey);
+    try {
+      await saveStudioStateToCloud();
+      showToast(`已将 ${cards.length} 件作品移入回收站。`, "warning");
+    } catch {
+      showToast("稿件已在本页移入回收站，但云端同步失败，请保持页面并重试。", "error");
+    }
+    return;
+  }
   const deletedAt = new Date().toISOString();
   cards.forEach((card) => {
     card.classList.add("deleted");
     card.dataset.deletedAt = deletedAt;
     markWorkRecordDirty(card);
-    deletedWorks = deletedWorks.filter((item) => item.card !== card);
+    deletedWorks = deletedWorks.filter((item) => item.card.dataset.file !== card.dataset.file);
     deletedWorks.push({ card, deletedAt });
   });
   libraryManageSelection.clear();
-  saveStudioState();
   renderRecycleBin();
   renderDailyReviewBoard();
   configureWorksView(roleSelect.value, currentAccount.ownerKey);
-  showToast(`已将 ${cards.length} 件作品移入回收站。`, "warning");
+  try {
+    await saveStudioStateToCloud();
+    showToast(`已将 ${cards.length} 件作品移入回收站。`, "warning");
+  } catch {
+    showToast("稿件已在本页移入回收站，但云端同步失败，请保持页面并重试。", "error");
+  }
 });
 
-libraryManageSleep?.addEventListener("click", () => {
+libraryManageSleep?.addEventListener("click", async () => {
   const cards = selectedLibraryManageCards();
   if (!cards.length || !window.confirm(`确认将已选中的 ${cards.length} 件作品移入休眠区吗？`)) return;
   cards.forEach(setWorkSleepingForBatch);
   libraryManageSelection.clear();
-  saveStudioState();
   renderSleepList();
   renderDailyReviewBoard();
   configureWorksView(roleSelect.value, currentAccount.ownerKey);
-  showToast(`已将 ${cards.length} 件作品移入休眠区。`, "success");
+  try {
+    await saveStudioStateToCloud();
+    showToast(`已将 ${cards.length} 件作品移入休眠区。`, "success");
+  } catch {
+    showToast("稿件已在本页移入休眠区，但云端同步失败，请保持页面并重试。", "error");
+  }
 });
 
 worksBoard?.addEventListener("click", (event) => {
@@ -12880,12 +13164,21 @@ worksBoard?.addEventListener("click", (event) => {
 
 function sleepItemsForRole() {
   if (currentAccount.role === "管理员" || currentAccount.role === "销售") {
-    return [...workCards].filter((card) => !card.classList.contains("deleted") && isSleepingWork(card));
+    return uniqueWorkCardsByFile([...workCards].filter((card) => !card.classList.contains("deleted") && isSleepingWork(card)));
   }
   if (isCreatorRole()) {
-    return [...workCards].filter((card) => card.dataset.workOwner === currentAccount.ownerKey && isPersonallySleeping(card));
+    return uniqueWorkCardsByFile([...workCards].filter((card) => card.dataset.workOwner === currentAccount.ownerKey && isPersonallySleeping(card)));
   }
   return [];
+}
+
+function uniqueWorkCardsByFile(cards) {
+  const unique = new Map();
+  (cards || []).forEach((card) => {
+    const file = String(card?.dataset?.file || "").trim();
+    if (file && !unique.has(file)) unique.set(file, card);
+  });
+  return [...unique.values()];
 }
 
 let sleepManageMode = false;
@@ -13083,7 +13376,7 @@ function renderSleepList() {
   });
 }
 
-function resubmitSleepingWork(card, mode) {
+async function resubmitSleepingWork(card, mode) {
   card.classList.remove("sleeping");
   card.dataset.sleeping = "";
   card.dataset.reviewState = "pending";
@@ -13100,11 +13393,15 @@ function resubmitSleepingWork(card, mode) {
   renderDailyReviewBoard();
   renderNotifications();
   sortWorkCards();
-  saveStudioState();
-  showToast(`${card.dataset.file} 已作为 V${card.dataset.submissionRound} 重新提交到评审区。`, "success");
+  try {
+    await saveStudioStateToCloud();
+    showToast(`${card.dataset.file} 已作为 V${card.dataset.submissionRound} 重新提交到评审区。`, "success");
+  } catch {
+    showToast("稿件已在本页重新提交，但云端同步失败，请保持页面并重试。", "error");
+  }
 }
 
-function deleteWorkCard(card) {
+async function deleteWorkCard(card) {
   const file = card.dataset.file;
   const confirmed = window.confirm(`确认删除 ${file} 吗？删除后会进入回收站。`);
   if (!confirmed) {
@@ -13115,10 +13412,30 @@ function deleteWorkCard(card) {
   if (!["管理员", "设计师", "手绘师"].includes(currentAccount.role)) return;
 
   ensureArchivePreviewPersisted(card);
+  if (isCreatorRole()) {
+    setPersonalArchiveState(card, "delete", true);
+    recordActivityNotification({
+      type: "work-delete",
+      title: "稿件已移入回收站",
+      text: `${currentAccount.name || currentAccount.role} 删除了「${file}」`,
+      relatedOwners: [card.dataset.workOwner],
+      adminOnly: true,
+    });
+    renderRecycleBin();
+    renderSleepList();
+    configureWorksView(roleSelect.value, currentAccount.ownerKey);
+    try {
+      await saveStudioStateToCloud();
+      showToast(`${file} 已移入回收站，可在回收站中恢复。`, "warning");
+    } catch {
+      showToast("稿件已在本页移入回收站，但云端同步失败，请保持页面并重试。", "error");
+    }
+    return;
+  }
   card.classList.add("deleted");
   card.dataset.deletedAt = new Date().toISOString();
   markWorkRecordDirty(card);
-  deletedWorks = deletedWorks.filter((item) => item.card !== card);
+  deletedWorks = deletedWorks.filter((item) => item.card.dataset.file !== file);
   deletedWorks.push({ card, deletedAt: card.dataset.deletedAt });
   recordActivityNotification({
     type: "work-delete",
@@ -13127,28 +13444,52 @@ function deleteWorkCard(card) {
     relatedOwners: [card.dataset.workOwner],
     adminOnly: !isAdministrator(),
   });
-  saveStudioState();
   renderRecycleBin();
   renderDailyReviewBoard();
   renderSleepList();
   configureWorksView(roleSelect.value, currentAccount.ownerKey);
-  showToast(`${file} 已移入回收站，可在回收站中恢复。`, "warning");
+  try {
+    await saveStudioStateToCloud();
+    showToast(`${file} 已移入回收站，可在回收站中恢复。`, "warning");
+  } catch {
+    showToast("稿件已在本页移入回收站，但云端同步失败，请保持页面并重试。", "error");
+  }
 }
 
-function restoreWorkCard(card) {
+async function restoreWorkCard(card) {
   const file = card.dataset.file;
+  if (isCreatorRole()) {
+    if (card.dataset.workOwner !== currentAccount.ownerKey) return;
+    const bucket = personalArchiveBucket();
+    delete bucket.deleted[file];
+    delete bucket.removed[file];
+    configureWorksView(roleSelect.value, currentAccount.ownerKey);
+    renderRecycleBin();
+    renderSleepList();
+    try {
+      await saveStudioStateToCloud();
+      showToast(`${file} 已恢复，重新显示在我的稿件中。`, "success");
+    } catch {
+      showToast("稿件已在本页恢复，但云端同步失败，请保持页面并重试。", "error");
+    }
+    return;
+  }
   if (currentAccount.role !== "管理员") return;
   card.classList.remove("deleted");
   delete card.dataset.deletedAt;
   markWorkRecordDirty(card);
-  deletedWorks = deletedWorks.filter((item) => item.card !== card);
-  saveStudioState();
+  deletedWorks = deletedWorks.filter((item) => item.card.dataset.file !== file);
   configureWorksView(roleSelect.value, currentAccount.ownerKey);
   renderRecycleBin();
   renderSleepList();
   renderDailyReviewBoard();
   renderLibraryGrid();
-  showToast(`${file} 已恢复，重新显示在作品列表中。`, "success");
+  try {
+    await saveStudioStateToCloud();
+    showToast(`${file} 已恢复，重新显示在作品列表中。`, "success");
+  } catch {
+    showToast("稿件已在本页恢复，但云端同步失败，请保持页面并重试。", "error");
+  }
 }
 
 function requestRestoreWorkCard(card) {
@@ -13158,7 +13499,7 @@ function requestRestoreWorkCard(card) {
     message: "确认后该稿件会离开回收站，并恢复到删除前的作品列表中。",
     submitText: "确认恢复",
     cancelText: "取消",
-    onConfirm: () => restoreWorkCard(card),
+    onConfirm: async () => restoreWorkCard(card),
   });
 }
 
@@ -13182,8 +13523,12 @@ function workStorageKeys(card) {
 }
 
 function permanentlyRemoveWorkCards(cards) {
-  const list = [...new Set((cards || []).filter(Boolean))];
-  const files = list.map((card) => card.dataset.file).filter(Boolean);
+  const requestedFiles = new Set((cards || []).map((card) => card?.dataset?.file).filter(Boolean));
+  const list = [...new Set([
+    ...(cards || []).filter(Boolean),
+    ...[...workCards].filter((card) => requestedFiles.has(card.dataset.file)),
+  ])];
+  const files = [...requestedFiles];
   const storageKeys = [...new Set(list.flatMap(workStorageKeys))];
   studioState.removedFiles = [...new Set([...(studioState.removedFiles || []), ...files])];
   list.forEach((card) => card.remove());
@@ -13192,9 +13537,13 @@ function permanentlyRemoveWorkCards(cards) {
     workRecordCache.delete(file);
     dirtyWorkFiles.delete(file);
   });
-  if (storageKeys.length && window.KingBlobStore?.remove) {
-    Promise.allSettled(storageKeys.map((key) => window.KingBlobStore.remove(key))).catch(() => {});
-  }
+  files.cleanupPromise = Promise.allSettled(storageKeys.flatMap((key) => [
+    window.KingBlobStore?.remove ? window.KingBlobStore.remove(key) : Promise.resolve(),
+    deleteBackendStudioAsset(key),
+  ])).then((results) => {
+    const failed = results.filter((result) => result.status === "rejected");
+    if (failed.length) throw Object.assign(new Error("STUDIO_ASSET_DELETE_FAILED"), { failures: failed.length });
+  });
   return files;
 }
 
@@ -13207,6 +13556,7 @@ function purgeExpiredRecycleBin() {
   });
   if (!expired.length) return;
   const expiredFiles = permanentlyRemoveWorkCards(expired.map(({ card }) => card));
+  expiredFiles.cleanupPromise.catch((error) => console.warn("过期回收站文件清理失败。", error));
   deletedWorks = deletedWorks.filter(({ card }) => !expiredFiles.includes(card.dataset.file));
   refreshWorkCards();
   saveStudioState();
@@ -13225,8 +13575,19 @@ function recycleStatusMatches(card) {
 function renderRecycleBin() {
   populateArchiveTagFilters();
   const keyword = recycleSearch.value.trim().toLowerCase();
-  const sourceItems = currentAccount.role === "管理员" ? deletedWorks : [];
-  let items = sourceItems.filter(({ card }) => {
+  const sourceItems = currentAccount.role === "管理员"
+    ? deletedWorks
+    : isCreatorRole()
+      ? [...workCards]
+        .filter((card) => card.dataset.workOwner === currentAccount.ownerKey && personalArchiveBucket().deleted?.[card.dataset.file])
+        .map((card) => ({ card, deletedAt: personalArchiveBucket().deleted[card.dataset.file] }))
+      : [];
+  const uniqueSourceItems = new Map();
+  sourceItems.forEach((item) => {
+    const file = item.card?.dataset?.file;
+    if (file) uniqueSourceItems.set(file, item);
+  });
+  let items = [...uniqueSourceItems.values()].filter(({ card }) => {
     const text = `${card.dataset.file} ${card.textContent}`.toLowerCase();
     return (!keyword || searchMatches(keyword, [text])) && archiveTypeMatches(card, recycleArchiveType) && archiveTagFiltersMatch(card, "recycle") && recycleStatusMatches(card);
   });
@@ -13388,7 +13749,8 @@ function applyLogin(accountKey, account) {
   const loginPortal = account.role === "客户" ? "client" : "employee";
   window.KingLoginPortal?.setSubmitting(loginPortal, true);
   const loginLoadingStartedAt = Date.now();
-  showAppLoading(account.role === "客户" ? "正在进入客户端…" : "正在进入总控台…");
+  showAppLoading(account.role === "客户" ? "正在进入客户端…" : "正在进入总控台…", { progress: true });
+  setAppLoadingProgress(90, "正在渲染工作台…");
   // 先让遮罩真正绘制一帧，再进行页面切换和数据渲染，避免点击后像“没有反应”。
   waitForUiPaint().then(() => {
     currentAccount = { ...account };
@@ -13420,10 +13782,17 @@ function applyLogin(accountKey, account) {
     loginScreen.classList.add("hidden");
     appShell.classList.remove("locked");
     loginError.textContent = "";
-    const ready = account.role === "客户"
+    const cloudCleanup = pendingCloudStudioCleanup
+      ? cleanupDuplicateCloudStudioRecords().catch((error) => {
+          console.warn("重复稿件云端清理失败，将在下次登录继续重试。", error);
+        })
+      : Promise.resolve();
+    const workspaceReady = account.role === "客户"
       ? initialImageHydration
       : Promise.all([initialImageHydration, ensureCaseLibraryReady()]);
+    const ready = Promise.all([workspaceReady, cloudCleanup]);
     ready.finally(() => {
+      setAppLoadingProgress(100, "工作台已准备完成");
       const remaining = Math.max(0, 560 - (Date.now() - loginLoadingStartedAt));
       setTimeout(() => requestAnimationFrame(() => {
         hideAppLoading();
@@ -13893,22 +14262,22 @@ loginForm.addEventListener("submit", async (event) => {
   const accountKey = usernameInput.value.trim().toLowerCase();
   loginError.textContent = "";
   window.KingLoginPortal?.setSubmitting("employee", true);
+  showAppLoading("正在验证账号…", { progress: true });
+  setAppLoadingProgress(12, "正在验证账号和岗位权限…");
   try {
     const account = RELEASE_CONFIG.useBackendAuth
       ? await authenticateEmployee(accountKey, passwordInput.value)
       : demoAccounts[accountKey]?.password === passwordInput.value ? demoAccounts[accountKey] : null;
     if (!account) throw Object.assign(new Error("INVALID_CREDENTIALS"), { code: "INVALID_CREDENTIALS" });
+    setAppLoadingProgress(26, "登录成功，正在连接云端工作室…");
     if (account.accountStatus === "已停用") throw Object.assign(new Error("ACCOUNT_DISABLED"), { code: "ACCOUNT_DISABLED" });
     if (!RELEASE_CONFIG.enabledEmployeeRoles?.includes(account.role)) throw Object.assign(new Error("ROLE_NOT_ENABLED"), { code: "ROLE_NOT_ENABLED" });
-    if (RELEASE_CONFIG.useBackendAuth && await pullBackendStudioState()) {
-      sessionStorage.setItem(BACKEND_LOGIN_RELOAD_KEY, "1");
-      location.reload();
-      return;
-    }
+    if (RELEASE_CONFIG.useBackendAuth) await pullBackendStudioState({ refreshUi: true, showProgress: true });
     if (!RELEASE_CONFIG.useBackendAuth) saveRememberedLogin("employee", accountKey, passwordInput.value, employeeRememberPassword.checked);
     applyLogin(accountKey, account);
     return;
   } catch (error) {
+    hideAppLoading();
     loginError.textContent = error.code === "ACCOUNT_DISABLED" ? "该账号已被管理员停用。" : error.code === "ROLE_NOT_ENABLED" ? "该岗位暂未开放登录。" : error.code === "AUTH_NOT_CONFIGURED" ? "认证服务尚未配置。" : "账号或密码不正确。";
   } finally {
     window.KingLoginPortal?.setSubmitting("employee", false);
@@ -15306,9 +15675,6 @@ employeeBatchList?.addEventListener("click", (event) => {
 });
 employeeAccountClose?.addEventListener("click", closeEmployeeAccountModal);
 employeeAccountCancel?.addEventListener("click", closeEmployeeAccountModal);
-employeeAccountModal?.addEventListener("click", (event) => {
-  if (event.target === employeeAccountModal) closeEmployeeAccountModal();
-});
 employeeAccountForm?.addEventListener("click", (event) => event.stopPropagation());
 employeeAccountForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -15331,25 +15697,43 @@ employeeAccountForm?.addEventListener("submit", async (event) => {
     const results = rows.map(({ name, role }) => {
       const { username, password } = randomEmployeeCredentials(name);
       const joinedAt = formatDateTime();
-      const member = { name, role, ownerKey: username, tone: "blue", baseLoadScore: 0, accountStatus: "正常", joinedAt };
-      teamMembers.push(member);
-      persistEmployeeAccount(member, { password, createdAt: joinedAt });
-      return { name, role, username, password };
+      return { name, role, username, password, joinedAt };
     });
-    if (RELEASE_CONFIG.useBackendAuth) {
-      try {
-        await Promise.all(results.map((item) => provisionBackendEmployeeAccount(item)));
-      } catch (error) {
-        employeeAccountError.textContent = error?.code === "ACCOUNT_ALREADY_EXISTS"
-          ? "账号已存在，请改用编辑或更换账号。"
-          : "云端账号创建失败，请稍后重试。";
-        return;
+    const provisionedAccounts = [];
+    setEmployeeAccountSubmitting(true);
+    try {
+      if (RELEASE_CONFIG.useBackendAuth) {
+        for (const item of results) {
+          const provisioned = await provisionBackendEmployeeAccount(item);
+          if (provisioned?.created) provisionedAccounts.push(item.username);
+        }
       }
+      results.forEach((item) => {
+        const member = { name: item.name, role: item.role, ownerKey: item.username, tone: "blue", baseLoadScore: 0, accountStatus: "正常", joinedAt: item.joinedAt };
+        teamMembers.push(member);
+        persistEmployeeAccount(member, { password: item.password, createdAt: item.joinedAt });
+      });
+      syncProjectMemberOptions();
+      await saveStudioStateToCloud();
+    } catch (error) {
+      const failedKeys = new Set(results.map((item) => item.username));
+      for (let index = teamMembers.length - 1; index >= 0; index -= 1) {
+        if (failedKeys.has(teamMembers[index].ownerKey)) teamMembers.splice(index, 1);
+      }
+      const accounts = readRegisteredAccounts();
+      failedKeys.forEach((key) => {
+        delete accounts[key];
+        delete demoAccounts[key];
+      });
+      writeRegisteredAccounts(accounts);
+      await Promise.allSettled(provisionedAccounts.map((username) => deprovisionBackendEmployeeAccount({ username })));
+      employeeAccountError.textContent = employeeCloudErrorMessage(error, "创建");
+      return;
+    } finally {
+      setEmployeeAccountSubmitting(false);
     }
-    syncProjectMemberOptions();
-    await saveStudioStateToCloud();
     renderTeamView();
-    showEmployeeCredentialResults(results);
+    showEmployeeCredentialResults(results.map(({ joinedAt: _joinedAt, ...item }) => item));
     showToast(`已为 ${results.length} 位员工设置账号。`, "success");
     return;
   }
@@ -15364,6 +15748,10 @@ employeeAccountForm?.addEventListener("submit", async (event) => {
   }
   if (!username) {
     employeeAccountError.textContent = "请输入登录账号。";
+    return;
+  }
+  if (!/^[a-z0-9][a-z0-9._-]{2,23}$/.test(username)) {
+    employeeAccountError.textContent = "登录账号需为 3-24 位英文、数字、点、下划线或短横线。";
     return;
   }
   const registeredAccounts = readRegisteredAccounts();
@@ -15383,47 +15771,53 @@ employeeAccountForm?.addEventListener("submit", async (event) => {
     employeeAccountError.textContent = "请输入登录密码。";
     return;
   }
-  const wasEditing = Boolean(editingEmployeeAccountKey);
-  const previousKey = editingEmployeeAccountKey;
-  let member = teamMembers.find((item) => item.ownerKey === editingEmployeeAccountKey);
-  if (!member) {
-    const joinedAt = formatDateTime();
-    member = { name, role, ownerKey: username, tone: "blue", baseLoadScore: 0, accountStatus: "正常", joinedAt };
-    teamMembers.push(member);
-  } else {
-    member.name = name;
-    member.role = role;
-    member.joinedAt = joinedAt;
-    if (previousKey !== username) {
-      activeWorkCards().forEach((card) => {
-        if (card.dataset.workOwner === previousKey) card.dataset.workOwner = username;
-      });
-      delete registeredAccounts[previousKey];
-      delete demoAccounts[previousKey];
-      writeRegisteredAccounts(registeredAccounts);
-    }
-    member.ownerKey = username;
+  if (password && password.length < 8) {
+    employeeAccountError.textContent = "登录密码至少需要 8 位。";
+    return;
   }
+  const wasEditing = Boolean(editingEmployeeAccountKey);
+  let member = teamMembers.find((item) => item.ownerKey === editingEmployeeAccountKey);
+  const originalMember = member ? { ...member } : null;
+  const originalAccount = member ? { ...(registeredAccounts[username] || demoAccounts[username] || {}) } : null;
+  const joinedAtValue = joinedAt;
   const accountPatch = { createdAt: joinedAt };
   if (password) accountPatch.password = password;
-  if (RELEASE_CONFIG.useBackendAuth) {
-    try {
-      await provisionBackendEmployeeAccount({ username, password, role, name });
-    } catch (error) {
-      employeeAccountError.textContent = error?.code === "ACCOUNT_ALREADY_EXISTS"
-        ? "账号已存在，请改用编辑或更换账号。"
-        : "云端账号保存失败，请稍后重试。";
-      return;
+  let provisioned = null;
+  setEmployeeAccountSubmitting(true);
+  try {
+    if (RELEASE_CONFIG.useBackendAuth) {
+      provisioned = await provisionBackendEmployeeAccount({ username, password, role, name, allowExisting: wasEditing });
     }
+    if (!member) {
+      member = { name, role, ownerKey: username, tone: "blue", baseLoadScore: 0, accountStatus: "正常", joinedAt: joinedAtValue };
+      teamMembers.push(member);
+    } else {
+      member.name = name;
+      member.role = role;
+      member.joinedAt = joinedAtValue;
+      member.ownerKey = username;
+    }
+    persistEmployeeAccount(member, accountPatch);
+    syncProjectMemberOptions();
+    await saveStudioStateToCloud();
+  } catch (error) {
+    if (member && !originalMember) teamMembers.splice(teamMembers.indexOf(member), 1);
+    if (member && originalMember) Object.assign(member, originalMember);
+    const rollbackAccounts = readRegisteredAccounts();
+    if (originalAccount) {
+      rollbackAccounts[username] = originalAccount;
+      demoAccounts[username] = originalAccount;
+    } else {
+      delete rollbackAccounts[username];
+      delete demoAccounts[username];
+    }
+    writeRegisteredAccounts(rollbackAccounts);
+    if (provisioned?.created) await deprovisionBackendEmployeeAccount({ username }).catch(() => {});
+    employeeAccountError.textContent = employeeCloudErrorMessage(error);
+    return;
+  } finally {
+    setEmployeeAccountSubmitting(false);
   }
-  persistEmployeeAccount(member, accountPatch);
-  if (previousKey && previousKey !== username && currentAccount.ownerKey === previousKey) {
-    currentAccount.ownerKey = username;
-    localStorage.setItem(SESSION_KEY, username);
-    localStorage.setItem(SESSION_ACCOUNT_DATA_KEY, JSON.stringify({ accountKey: username, account: { ...currentAccount } }));
-  }
-  syncProjectMemberOptions();
-  await saveStudioStateToCloud();
   renderTeamView();
   if (wasEditing) {
     closeEmployeeAccountModal();
@@ -16903,7 +17297,7 @@ document.addEventListener("click", (event) => {
 recycleSearch.addEventListener("input", renderRecycleBin);
 recycleStatus.addEventListener("change", renderRecycleBin);
 recycleSort.addEventListener("change", renderRecycleBin);
-  recycleList?.addEventListener("click", (event) => {
+recycleList?.addEventListener("click", async (event) => {
   const deleteButton = event.target.closest(".recycle-delete-work");
   if (deleteButton) {
     event.preventDefault();
@@ -16915,19 +17309,29 @@ recycleSort.addEventListener("change", renderRecycleBin);
       if (!card || !bucket.deleted?.[file] || !window.confirm(`永久删除 ${file} 吗？此操作不会影响管理员作品库。`)) return;
       bucket.removed[file] = new Date().toISOString();
       delete bucket.deleted[file];
-      saveStudioStateNow();
       renderRecycleBin();
-      showToast(`${file} 已从你的回收站移除。`, "warning");
+      try {
+        await saveStudioStateToCloud();
+        showToast(`${file} 已从你的回收站移除。`, "warning");
+      } catch {
+        showToast("回收站已在本页更新，但云端同步失败，请保持页面并重试。", "error");
+      }
       return;
     }
     if (currentAccount.role !== "管理员") return;
     const entry = deletedWorks.find((item) => item.card.dataset.file === file);
     if (!entry || !window.confirm(`永久删除 ${file} 吗？此操作不可恢复。`)) return;
-    permanentlyRemoveWorkCards([entry.card]);
-    deletedWorks = deletedWorks.filter((item) => item !== entry);
-    saveStudioStateNow();
-    renderRecycleBin();
-    showToast(`${file} 已永久删除。`, "warning");
+    const removedFiles = permanentlyRemoveWorkCards([entry.card]);
+    deletedWorks = deletedWorks.filter((item) => item.card.dataset.file !== file);
+    try {
+      await saveStudioStateToCloud();
+      await removedFiles.cleanupPromise;
+      renderRecycleBin();
+      showToast(`${file} 已永久删除。`, "warning");
+    } catch {
+      renderRecycleBin();
+      showToast("稿件元数据已删除，但云端原图清理未完全成功，系统会在后续同步中继续处理。", "error");
+    }
     return;
   }
   const restoreButton = event.target.closest(".restore-work");
@@ -16987,18 +17391,22 @@ document.querySelector("#sleepManageSelectAll")?.addEventListener("click", () =>
   }
   renderSleepList();
 });
-document.querySelector("#sleepManageRestore")?.addEventListener("click", () => {
+document.querySelector("#sleepManageRestore")?.addEventListener("click", async () => {
   if (currentAccount.role === "销售") return;
   const cards = sleepItemsForRole().filter((card) => sleepManageSelection.has(card.dataset.file));
-  cards.forEach((card) => setWorkSleeping(card, false, { silent: true }));
+  await Promise.all(cards.map((card) => setWorkSleeping(card, false, { silent: true })));
   sleepManageSelection.clear();
   renderSleepList();
   renderDailyReviewBoard();
   sortWorkCards();
-  saveStudioState();
-  showToast(`已恢复 ${cards.length} 件稿件。`, "success");
+  try {
+    await saveStudioStateToCloud();
+    showToast(`已恢复 ${cards.length} 件稿件。`, "success");
+  } catch {
+    showToast("稿件已在本页恢复，但云端同步失败，请保持页面并重试。", "error");
+  }
 });
-document.querySelector("#sleepManageDelete")?.addEventListener("click", () => {
+document.querySelector("#sleepManageDelete")?.addEventListener("click", async () => {
   if (currentAccount.role === "销售") return;
   const cards = sleepItemsForRole().filter((card) => sleepManageSelection.has(card.dataset.file));
   if (!cards.length || !window.confirm(`确认删除已选中的 ${cards.length} 件休眠稿件吗？删除后会进入回收站。`)) return;
@@ -17006,21 +17414,32 @@ document.querySelector("#sleepManageDelete")?.addEventListener("click", () => {
   if (isCreatorRole()) {
     cards.forEach((card) => setPersonalArchiveState(card, "delete", true));
     sleepManageSelection.clear();
-    saveStudioState();
     renderSleepList();
     renderRecycleBin();
+    try {
+      await saveStudioStateToCloud();
+      showToast(`已将 ${cards.length} 件休眠稿件移入回收站。`, "warning");
+    } catch {
+      showToast("稿件已在本页移入回收站，但云端同步失败，请保持页面并重试。", "error");
+    }
     return;
   }
   cards.forEach((card) => {
     card.classList.add("deleted");
     card.dataset.deletedAt = deletedAt;
     markWorkRecordDirty(card);
+    deletedWorks = deletedWorks.filter((item) => item.card.dataset.file !== card.dataset.file);
     deletedWorks.push({ card, deletedAt });
   });
   sleepManageSelection.clear();
-  saveStudioState();
   renderSleepList();
   renderRecycleBin();
+  try {
+    await saveStudioStateToCloud();
+    showToast(`已将 ${cards.length} 件休眠稿件移入回收站。`, "warning");
+  } catch {
+    showToast("稿件已在本页移入回收站，但云端同步失败，请保持页面并重试。", "error");
+  }
 });
 sleepList?.addEventListener("click", (event) => {
   const selection = event.target.closest("[data-sleep-select]");
@@ -17047,7 +17466,7 @@ sleepList?.addEventListener("click", (event) => {
   const card = sourceCardByFile(thumb.closest(".sleep-item")?.dataset.file);
   if (card) openLightbox(card, { worksLibrary: true });
 });
-emptyRecycle.addEventListener("click", () => {
+emptyRecycle.addEventListener("click", async () => {
   if (currentAccount.role !== "管理员") return;
   if (!deletedWorks.length) {
     return;
@@ -17058,11 +17477,17 @@ emptyRecycle.addEventListener("click", () => {
     return;
   }
 
-  permanentlyRemoveWorkCards(deletedWorks.map(({ card }) => card));
+  const removedFiles = permanentlyRemoveWorkCards(deletedWorks.map(({ card }) => card));
   deletedWorks = [];
-  saveStudioStateNow();
-  renderRecycleBin();
-  showToast("回收站已清空。", "warning");
+  try {
+    await saveStudioStateToCloud();
+    await removedFiles.cleanupPromise;
+    renderRecycleBin();
+    showToast("回收站已清空。", "warning");
+  } catch {
+    renderRecycleBin();
+    showToast("回收站元数据已清空，但部分云端原图仍在清理中。", "error");
+  }
 });
 const lightboxFigure = lightbox.querySelector(".lightbox-figure");
 lightboxOriginalImage?.addEventListener("load", applyPreviewZoom);
@@ -17329,9 +17754,11 @@ logoutButton.addEventListener("click", async () => {
   // 切换账号前立即落盘，确保管理员刚完成的审核结果能被创作者账号读到。
   flushStudioState();
   if (RELEASE_CONFIG.useBackendAuth) {
-    showAppLoading("正在同步云端数据…");
+    showAppLoading("正在同步云端数据…", { progress: true });
+    setAppLoadingProgress(20, "正在提交本页变更…");
     try {
       await backendLastSyncAttempt;
+      setAppLoadingProgress(100, "云端数据同步完成");
     } catch (error) {
       hideAppLoading();
       showToast("云端同步尚未完成，请保持当前页面并稍后重试退出。", "error");
@@ -17400,26 +17827,16 @@ if (requestedPortal === "client" && storedSessionContext?.account?.role !== "客
   switchLoginPortal("employee");
 } else if (RELEASE_CONFIG.useBackendAuth && backendAuthSession()?.account) {
   const sessionAccount = backendAuthSession().account;
-  if (sessionStorage.getItem(BACKEND_LOGIN_RELOAD_KEY) === "1") {
-    sessionStorage.removeItem(BACKEND_LOGIN_RELOAD_KEY);
-    applyLogin(sessionAccount.username, sessionAccount);
-  } else {
-    pullBackendStudioState()
-      .then((changed) => {
-        if (!changed) {
-          applyLogin(sessionAccount.username, sessionAccount);
-          return;
-        }
-        sessionStorage.setItem(BACKEND_LOGIN_RELOAD_KEY, "1");
-        location.reload();
-      })
+  showAppLoading("正在同步云端数据…", { progress: true });
+  setAppLoadingProgress(18, "正在恢复登录状态…");
+  pullBackendStudioState({ refreshUi: true, showProgress: true })
+      .then(() => applyLogin(sessionAccount.username, sessionAccount))
       .catch((error) => {
         const authenticationFailed = error?.status === 401
           || ["UNAUTHENTICATED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_REQUIRED"].includes(error?.code);
         if (authenticationFailed) {
           sessionStorage.removeItem(AUTH_SESSION_KEY);
           sessionStorage.removeItem(BACKEND_STUDIO_SYNC_KEY);
-          sessionStorage.removeItem(BACKEND_LOGIN_RELOAD_KEY);
           document.documentElement.classList.remove("backend-session-restoring");
           appShell.classList.add("locked");
           loginScreen.classList.remove("hidden");
@@ -17432,7 +17849,6 @@ if (requestedPortal === "client" && storedSessionContext?.account?.role !== "客
         applyLogin(sessionAccount.username, sessionAccount);
         setTimeout(() => showToast?.("云端暂时无法连接，恢复网络后会自动同步。", "warning"), 0);
       });
-  }
 } else if (!RELEASE_CONFIG.useBackendAuth && storedSessionContext?.accountKey && storedSessionContext?.account) {
   const freshAccount = demoAccounts[storedSessionContext.accountKey] || storedSessionContext.account;
   if (freshAccount.accountStatus === "已停用") {
@@ -18157,7 +18573,10 @@ function saveViewerNewClient(startAfter) {
 
 // ===== 全屏花型库 + 入口页 返回/入口 交互 =====
 (function bindViewerLibrary() {
-  document.querySelector("#topStartReview")?.addEventListener("click", startAnonymousViewing);
+  document.querySelector("#topStartReview")?.addEventListener("click", () => {
+    if (!["管理员", "销售"].includes(currentAccount.role)) return;
+    startAnonymousViewing();
+  });
   // 入口页左上角 返回客户中心
   document.querySelector("#viewerBack")?.addEventListener("click", () => {
     closeViewerEntry();

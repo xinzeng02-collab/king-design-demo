@@ -5,6 +5,10 @@ import * as admin from "../src/admin.js";
 class AdminRepo {
   constructor() { this.record = null; this.audits = []; }
   getStudioState(org) { return this.record?.organization_id === org ? this.record : null; }
+  getStudioStateMeta(org) {
+    const record = this.getStudioState(org);
+    return record ? { revision: record.revision, updated_at: record.updated_at } : null;
+  }
   replaceStudioState(org, state, expected, user) {
     const current = this.record?.revision || 0;
     if (current !== expected) return null;
@@ -24,9 +28,20 @@ const CUSTOMER = { userId: "u3", role: "customer", organizationId: "org1" };
 
 test("管理员可初始化工作台并读取", async () => {
   const repo = new AdminRepo();
-  const saved = await admin.replaceStudioState(repo, { state: { projects: [{ id: "p1" }] }, revision: 0 }, ADMIN);
+  const saved = await admin.replaceStudioState(repo, {
+    state: {
+      projects: [{ id: "p1" }],
+      resourceFolders: [{ id: "folder-1", name: "面料参考" }],
+      resources: [{ id: "resource-1", folderId: "folder-1", key: "team_resource_1" }],
+    },
+    revision: 0,
+  }, ADMIN);
   assert.equal(saved.revision, 1);
-  assert.deepEqual((await admin.getStudioState(repo, SALES)).state.projects, [{ id: "p1" }]);
+  const sharedState = (await admin.getStudioState(repo, SALES)).state;
+  assert.deepEqual(sharedState.projects, [{ id: "p1" }]);
+  assert.deepEqual(sharedState.resourceFolders, [{ id: "folder-1", name: "面料参考" }]);
+  assert.deepEqual(sharedState.resources, [{ id: "resource-1", folderId: "folder-1", key: "team_resource_1" }]);
+  assert.deepEqual(await admin.getStudioStateMeta(repo, SALES), { revision: 1, updatedAt: "now" });
   assert.equal(repo.audits[0].action, "studio_state_replace");
 });
 

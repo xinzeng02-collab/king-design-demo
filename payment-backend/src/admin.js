@@ -66,6 +66,17 @@ export async function getStudioState(repo, actor) {
   };
 }
 
+export async function getStudioStateMeta(repo, actor) {
+  requireStaff(actor);
+  const record = repo.getStudioStateMeta
+    ? await repo.getStudioStateMeta(actor.organizationId)
+    : await repo.getStudioState(actor.organizationId);
+  return {
+    revision: Number(record?.revision || 0),
+    updatedAt: record?.updated_at || null,
+  };
+}
+
 export async function replaceStudioState(repo, { state, revision }, actor) {
   requireAdmin(actor);
   validateRevision(revision);

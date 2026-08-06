@@ -86,7 +86,9 @@ export default {
 
       // ---- 管理工作台 ----
       if (pathname === "/api/admin/studio-state" && method === "GET")
-        return json(await admin.getStudioState(repo, actor));
+        return json(url.searchParams.get("meta") === "1"
+          ? await admin.getStudioStateMeta(repo, actor)
+          : await admin.getStudioState(repo, actor));
       if (pathname === "/api/admin/studio-state" && method === "PUT")
         return json(await admin.replaceStudioState(repo, body, actor));
       if (seg[1] === "admin" && seg[2] === "studio-state" && seg[3] === "modules" && seg[4] && method === "PATCH")

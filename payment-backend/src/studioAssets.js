@@ -92,9 +92,12 @@ export async function createStudioAssetUploadUrl(env, actor, key) {
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.url) throw fail(`SUPABASE_SIGN_UPLOAD_${response.status}`, 502);
+  const rawSignedUrl = result.url.startsWith("http") ? result.url : `${base}/storage/v1${result.url}`;
   return {
     key,
-    signedUrl: result.url.startsWith("http") ? result.url : `${base}/storage/v1${result.url}`,
+    // Supabase may return a readable path containing Chinese characters or
+    // spaces. URL normalisation keeps the signature and encodes that path.
+    signedUrl: new URL(rawSignedUrl).href,
   };
 }
 

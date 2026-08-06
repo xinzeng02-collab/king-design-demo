@@ -6,15 +6,16 @@
     <title>KiNG DESiGN 管理系统</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23111'/%3E%3Cpath d='M18 14v36h8V36l14 14h11L33 32l17-18H39L26 29V14z' fill='white'/%3E%3C/svg%3E" />
     <link rel="preload" as="image" href="./assets/textile-studio-hero.png" type="image/png" fetchpriority="high" />
-    <link rel="stylesheet" href="./styles.css?v=20260802-dashboard-reference-v114" />
+    <link rel="stylesheet" href="./styles.css?v=20260807-production-sync-v116" />
     <link rel="stylesheet" href="./login-experience.css?v=20260726-login-v2" />
     <link rel="stylesheet" href="./gallery-performance.css?v=20260727-performance-v2" />
     <link rel="stylesheet" href="./tdesign-strict.css?v=20260802-compare-image-v74" />
     <script>
       try {
-        if (sessionStorage.getItem("kingDesignBootShown")) document.documentElement.classList.add("skip-app-boot");
+        const restoringBackendSession = Boolean(sessionStorage.getItem("king_backend_auth_session_v1"));
+        if (restoringBackendSession) document.documentElement.classList.add("backend-session-restoring");
+        if (sessionStorage.getItem("kingDesignBootShown") && !restoringBackendSession) document.documentElement.classList.add("skip-app-boot");
         else sessionStorage.setItem("kingDesignBootShown", "1");
-        if (sessionStorage.getItem("king_backend_auth_session_v1")) document.documentElement.classList.add("backend-session-restoring");
       } catch {}
     </script>
     <style>
@@ -27,7 +28,7 @@
       .app-boot-track::after{content:"";display:block;width:45%;height:100%;background:#fff;animation:app-boot-progress 1.15s cubic-bezier(.65,0,.35,1) infinite}
       .app-boot-label{margin:0;color:rgba(255,255,255,.52);font:500 10px/1 Arial,sans-serif;letter-spacing:2.5px}
       .backend-session-restoring .login-screen{display:none!important}
-      .backend-session-restoring .app-shell.locked{display:grid}
+      .backend-session-restoring .app-shell.locked{display:none!important;visibility:hidden;pointer-events:none}
       .backend-session-restoring body{overflow:auto}
       @keyframes app-boot-progress{0%{transform:translateX(-110%)}100%{transform:translateX(330%)}}
       @media(prefers-reduced-motion:reduce){.app-boot-track::after{animation-duration:2.4s}}
@@ -327,7 +328,7 @@
               <span>刷新</span>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"></path><path d="M21 3v5h-5"></path></svg>
             </button>
-            <button class="top-start-review-button" id="topStartReview" type="button" aria-label="开始看稿">
+            <button class="top-start-review-button hidden" id="topStartReview" type="button" aria-label="开始看稿" hidden>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
               <span>开始看稿</span>
             </button>
@@ -1442,6 +1443,6 @@
     <script src="./performance-runtime.js?v=20260727-performance-v2"></script>
     <script src="./login-portals.js?v=20260807-login-recovery-v1"></script>
     <script src="/socket.io/socket.io.js"></script>
-  <script src="./script.js?v=20260807-ux-performance-v5"></script>
+  <script src="./script.js?v=20260807-production-sync-v8"></script>
   </body>
 </html>

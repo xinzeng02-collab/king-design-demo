@@ -63,6 +63,7 @@ export class SupabaseRepo {
 
   // 管理工作台（RPC 内用 revision 做原子乐观锁）
   getStudioState(organizationId) { return this._one(`studio_states?organization_id=eq.${organizationId}&limit=1`); }
+  getStudioStateMeta(organizationId) { return this._one(`studio_states?organization_id=eq.${organizationId}&select=revision,updated_at&limit=1`); }
   async replaceStudioState(organizationId, state, revision, updatedBy) {
     const result = await this._req("rpc/replace_studio_state", { method: "POST", body: {
       p_organization_id: organizationId, p_state: state,

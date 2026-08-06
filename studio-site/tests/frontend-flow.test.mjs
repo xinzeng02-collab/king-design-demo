@@ -258,12 +258,13 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-ux-performance-v5/);
+  assert.match(html, /script\.js\?v=20260807-production-sync-v7/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
-  assert.match(script, /function mergeStudioModule\(module, remoteValue, localValue\)/);
-  assert.match(script, /valueToSend = mergeStudioModule\(module, backendSyncMeta\(\)\?\.state\?\.\[module\], valueToSend\)/);
+  assert.match(script, /function mergeStudioModule\(module, remoteValue, localValue, previousValue\)/);
+  assert.match(script, /valueToSend = mergeStudioModule\(module, backendSyncMeta\(\)\?\.state\?\.\[module\], valueToSend, previousState\?\.\[module\]\)/);
+  assert.match(script, /const removedKeys = new Set/);
   assert.match(script, /backendLastSyncAttempt = backendSyncQueue\.then\(syncWithRetry\)/);
   assert.match(script, /await saveStudioStateToCloud\(\)/);
   assert.match(script, /logoutButton\.addEventListener\("click", async[\s\S]*?await backendLastSyncAttempt/);
@@ -279,6 +280,7 @@ test("正式版不泄漏演示设计师身份，成员档案只对管理员开�
 
   assert.doesNotMatch(html, /id="profileNameInput">许然/);
   assert.doesNotMatch(html, /id="lightboxOwner"[^>]*>设计师：许然/);
+  assert.doesNotMatch(script, /许然/);
   assert.match(script, /const legacyOwnerNames = RELEASE_CONFIG\.seedDemoData === false \? \{\} : \{/);
   assert.match(script, /if \(currentAccount\.role !== "管理员"\) return;[\s\S]*?lightboxOwner\.dataset\.memberName/);
   assert.match(script, /function openTeamMemberDetail\(memberKey\) \{\s*if \(currentAccount\.role !== "管理员"\) return;/);
@@ -309,6 +311,8 @@ test("设计师和手绘师有直达上传入口，并显示真实云端上传�
   assert.match(script, /request\.upload\.onprogress/);
   assert.match(script, /persistArtworkImageTiers\(plan\.baseKey, plan\.file, \{ onProgress: updateProgress \}\)/);
   assert.match(script, /setAppLoadingProgress\(100, "上传完成，正在打开稿件…"\)/);
+  assert.match(script, /topStartReview\?\.toggleAttribute\("hidden", !canStartReview\)/);
+  assert.match(script, /if \(!\["管理员", "销售"\]\.includes\(currentAccount\.role\)\) return;/);
 });
 
 test("客户、员工、订单、作品及评审关系都进入云端状态模块", async () => {
@@ -316,6 +320,7 @@ test("客户、员工、订单、作品及评审关系都进入云端状态模�
   for (const module of [
     "createdWorks", "overrides", "removedFiles", "activityNotifications", "orders",
     "projects", "customers", "teamMembers", "personalWorkArchives", "sharedWorkspaceLocalData",
+    "resourceFolders", "resources",
   ]) {
     assert.match(script, new RegExp(`${module}[,:]`));
   }
@@ -324,16 +329,42 @@ test("客户、员工、订单、作品及评审关系都进入云端状态模�
   assert.match(script, /sleeping:\s*data\.sleeping/);
 });
 
-test("云端登录加载状态后最多刷新一次", async () => {
+test("云端同步原地增量更新界面，不再自动整页刷新", async () => {
+  const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(script, /BACKEND_LOGIN_RELOAD_KEY/);
-  assert.match(script, /sessionStorage\.setItem\(BACKEND_LOGIN_RELOAD_KEY, "1"\);\s*location\.reload\(\)/);
-  assert.match(script, /sessionStorage\.getItem\(BACKEND_LOGIN_RELOAD_KEY\) === "1"/);
-  assert.match(script, /sessionStorage\.removeItem\(BACKEND_LOGIN_RELOAD_KEY\);\s*applyLogin\(sessionAccount\.username, sessionAccount\)/);
+  assert.match(script, /function applyCloudStudioState\(remoteState, remoteJson, changedModules\)/);
+  assert.match(script, /function applyLightweightCloudModules/);
+  assert.match(script, /pullBackendStudioState\(\{ refreshUi: true, checkRevision: true \}\)/);
+  assert.match(script, /backendApi\("\/api\/admin\/studio-state\?meta=1"\)/);
+  assert.doesNotMatch(script, /BACKEND_LOGIN_RELOAD_KEY/);
+  const puller = script.match(/async function pullBackendStudioState[\s\S]*?\n\}/)?.[0] || "";
+  assert.doesNotMatch(puller, /location\.reload\(\)/);
   assert.match(script, /function refreshBackendAuthSession/);
   assert.match(script, /response\.status === 401 && session\.refreshToken/);
   assert.match(script, /短时断网或接口超时不能等同于退出登录/);
+  assert.match(script, /showAppLoading\("正在验证账号…", \{ progress: true \}\)/);
+  assert.match(script, /setAppLoadingProgress\(100, "工作台已准备完成"\)/);
+  assert.match(script, /showAppLoading\("正在同步云端数据…", \{ progress: true \}\)/);
+  assert.match(html, /if \(sessionStorage\.getItem\("kingDesignBootShown"\) && !restoringBackendSession\)/);
+  assert.match(html, /\.backend-session-restoring \.app-shell\.locked\{display:none!important;visibility:hidden;pointer-events:none\}/);
+  assert.doesNotMatch(html, /\.backend-session-restoring \.app-shell\.locked\{display:grid/);
+});
+
+test("云端稿件恢复会清理分页暂存副本并将去重结果写回服务器", async () => {
+  const script = await read("script.js");
+  const reset = script.match(/function resetStudioRuntimeBeforeCloudHydration\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const refresh = script.match(/function refreshWorkCards\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const cleanup = script.match(/async function cleanupDuplicateCloudStudioRecords\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+
+  assert.match(script, /function dedupeCreatedWorks\(records\)/);
+  assert.match(script, /unique\.set\(file, record\)/);
+  assert.match(reset, /workCardParking\?\.querySelectorAll\("\.work-card"\)/);
+  assert.match(reset, /workCards = \[\]/);
+  assert.match(refresh, /if \(uniqueCards\.has\(file\)\) \{\s*card\.remove\(\)/);
+  assert.match(script, /if \(!work\?\.file \|\| existingWorkFiles\.has\(work\.file\)\) return/);
+  assert.match(cleanup, /pushBackendStudioModules\(previousState, nextState\)/);
+  assert.match(script, /pendingCloudStudioCleanupPreviousState = \{[\s\S]*?createdWorks:/);
 });
 
 test("未关闭订单中的花型不会再次出现在花型库", async () => {
@@ -584,10 +615,13 @@ test("休眠、回收站和人员选择遵循统一状态与保留规则", async
   const html = await read("index.html");
   const styles = await read("styles.css");
   assert.match(html, /id="emptyRecycle" data-admin-action/);
-  assert.match(script, /emptyRecycle\.addEventListener\("click", \(\) => \{\s*if \(currentAccount\.role !== "管理员"\) return/);
+  assert.match(script, /emptyRecycle\.addEventListener\("click", async \(\) => \{\s*if \(currentAccount\.role !== "管理员"\) return/);
   assert.match(script, /const retentionMs = 90 \* 24 \* 60 \* 60 \* 1000/);
   assert.match(script, /function permanentlyRemoveWorkCards/);
   assert.match(script, /window\.KingBlobStore\?\.remove/);
+  assert.match(script, /deleteBackendStudioAsset\(key\)/);
+  assert.match(script, /await saveStudioStateToCloud\(\)/);
+  assert.match(script, /personalArchiveBucket\(\)\.deleted\?\.\[card\.dataset\.file\]/);
   assert.match(script, /clone\.classList\.add\(mode === "sleep" \? "sleep-item" : "recycle-item"\)/);
   assert.match(html, /class="works-board library-gallery review-card-grid recycle-list"/);
   assert.match(script, /clone\.classList\.add\(mode === "sleep" \? "sleep-item" : "recycle-item"\)/);
@@ -605,10 +639,13 @@ test("休眠、回收站和人员选择遵循统一状态与保留规则", async
   assert.match(script, /lightboxSleepToggle\.classList\.toggle\("hidden", recycleDetailContext \|\| !\(adminReviewContext \|\| metadataContext\)\)/);
   assert.match(script, /lightboxDeleteWork\.classList\.toggle\("hidden", recycleDetailContext \|\| !\(adminReviewContext \|\| metadataContext \|\| uploaderContext\)\)/);
   assert.match(script, /event\.target\.closest\("\.library-card\[data-library-file\]"\)/);
-  const resubmitBlock = script.match(/function resubmitSleepingWork\(card, mode\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const resubmitBlock = script.match(/async function resubmitSleepingWork\(card, mode\) \{[\s\S]*?\n\}/)?.[0] || "";
   assert.match(resubmitBlock, /reviewState = "pending"/);
   assert.match(resubmitBlock, /submissionRound/);
+  assert.match(resubmitBlock, /await saveStudioStateToCloud\(\)/);
   assert.doesNotMatch(resubmitBlock, /clearReviewLogs/);
+  assert.match(script, /async function restoreWorkCard\(card\)[\s\S]*?await saveStudioStateToCloud\(\)/);
+  assert.match(script, /#sleepManageRestore"\)\?\.addEventListener\("click", async \(\) =>[\s\S]*?await saveStudioStateToCloud\(\)/);
   assert.match(script, /const visibleInputs = choiceInputs\.filter/);
   assert.match(script, /const values = \[\.\.\.selected\]/);
   assert.match(script, /p\.owners = \[owner\]/);
@@ -761,6 +798,8 @@ test("常用增删改、确认、上传与下载控件具备统一交互反馈",
   }
   assert.match(styles, /transform:\s*translateY\(-1px\)/);
   assert.match(styles, /transform:\s*translateY\(0\) scale\(\.97\)/);
+  assert.match(styles, /transition-delay:\s*0ms/);
+  assert.match(styles, /transform 90ms cubic-bezier/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
 });
 
@@ -899,6 +938,22 @@ test("员工账号弹窗保护编辑过程，并提供详情与密码复制", as
   assert.match(script, /加入时间/);
   assert.match(script, /data-employee-copy/);
   assert.match(script, /data-team-member-copy/);
+  assert.match(script, /if \(password && password\.length < 8\)/);
+  assert.match(script, /登录密码至少需要 8 位/);
+  assert.match(script, /if \(employeeAccountSubmitting && !force\) return/);
+  assert.match(script, /employeeAccountUsername\.readOnly = Boolean\(member\)/);
+  assert.doesNotMatch(script, /employeeAccountModal\?\.addEventListener\("click"/);
+  assert.match(script, /provisioned = await provisionBackendEmployeeAccount[\s\S]*?teamMembers\.push\(member\)/);
   assert.match(styles, /\.team-member-cell \.team-avatar\s*\{\s*flex:\s*0 0 30px/);
   assert.match(styles, /\.team-member-detail-modal/);
+});
+
+test("管理员待评审稿件在侧栏标题旁显示状态红点", async () => {
+  const script = await read("script.js");
+  const styles = await read("styles.css");
+
+  assert.match(script, /const pendingReviewCount = currentAccount\.role === "管理员"/);
+  assert.match(script, /statusDot\("review", pendingReviewCount > 0/);
+  assert.match(script, /renderDailyReviewBoard\(\)[\s\S]*?updateSidebarBadges\(\)/);
+  assert.match(styles, /\.nav-item\.has-status-dot \.nav-label::after\s*\{[\s\S]*?background:\s*#d54941/);
 });

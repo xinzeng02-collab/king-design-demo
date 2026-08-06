@@ -75,6 +75,24 @@ test("管理员创建员工账号会同步 Supabase 用户和岗位 membership",
   assert.match(calls[2].options.body, /"role":"designer"/);
 });
 
+test("新建员工不会覆盖已经存在的云端账号", async () => {
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/auth/v1/admin/users?")) {
+      return new Response(JSON.stringify({ users: [{ id: "u-existing", email: "designer@king-design.local" }] }), { status: 200 });
+    }
+    throw new Error(`Unexpected ${url}`);
+  };
+  await assert.rejects(
+    authApi.provisionEmployee(
+      {},
+      { ...env, SUPABASE_SERVICE_ROLE_KEY: "service-key" },
+      { userId: "u-admin", role: "admin", organizationId: "org1" },
+      { username: "designer", password: "designer123", role: "设计师", name: "设计师" },
+    ),
+    /ACCOUNT_ALREADY_EXISTS/,
+  );
+});
+
 test("管理员移出员工会撤销 organization membership 和 Supabase Auth 用户", async () => {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {

@@ -740,6 +740,11 @@ button:focus-visible {
   transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
 }
 
+.top-start-review-button.hidden,
+.top-start-review-button[hidden] {
+  display: none !important;
+}
+
 .top-start-review-button::after { content: ""; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 20%, rgba(255,255,255,.38) 48%, transparent 72%); transform: translateX(-120%); animation: customer-viewer-shine 4.8s ease-in-out infinite; pointer-events: none; }
 .top-start-review-button > * { position: relative; z-index: 1; }
 .top-start-review-button svg { width: 15px; height: 15px; flex: 0 0 auto; fill: currentColor; }
@@ -870,7 +875,18 @@ button:focus-visible {
   stroke-linejoin: round;
 }
 
-.nav-item .nav-label { min-width: 0; }
+.nav-item .nav-label { display: inline-flex; min-width: 0; align-items: center; }
+.nav-item.has-status-dot .nav-label::after {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  margin-left: 8px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #d54941;
+  box-shadow: 0 0 0 1px rgba(213,73,65,.12);
+  content: "";
+}
 
 .nav-item.hidden {
   display: none;
@@ -14026,13 +14042,14 @@ body, input, button, select, textarea, h1, h2, h3, h4, p, span, div {
   #resourceUploadButton, #emptyRecycle, .open-upload, .pjd-file-upload,
   .pjf-file-add, .standard-add-button, .empty-upload-button
 ) {
+  transition-delay: 0ms;
   transition:
-    transform 150ms cubic-bezier(.2,.75,.25,1),
-    box-shadow 150ms ease,
-    border-color 150ms ease,
-    background-color 150ms ease,
-    color 150ms ease,
-    opacity 150ms ease;
+    transform 90ms cubic-bezier(.2,.75,.25,1),
+    box-shadow 90ms ease,
+    border-color 90ms ease,
+    background-color 90ms ease,
+    color 90ms ease,
+    opacity 90ms ease;
 }
 
 :where(
@@ -14043,7 +14060,7 @@ body, input, button, select, textarea, h1, h2, h3, h4, p, span, div {
   #lightboxEditWork, #lightboxDeleteWork, #lightboxSleepToggle,
   #resourceUploadButton, .open-upload, .pjd-file-upload, .pjf-file-add
 ) :where(svg, i) {
-  transition: transform 150ms cubic-bezier(.2,.75,.25,1);
+  transition: transform 90ms cubic-bezier(.2,.75,.25,1);
 }
 
 @media (hover: hover) and (pointer: fine) {
