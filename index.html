@@ -19349,12 +19349,22 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     const storageKey = `${user.id}/${work.id}/${safeName}`;
     const { error: uploadError } = await client.storage.from("artworks").upload(storageKey, file, { upsert: false });
     if (uploadError) {
-      await client.from("works").update({ status: "failed" }).eq("id", work.id);
+      await client.from("works").update({ status: "failed", storage_key: null }).eq("id", work.id);
       throw uploadError;
     }
     const { data: ready, error: updateError } = await client.from("works")
-      .update({ status: "ready", storage_key: storageKey }).eq("id", work.id).select().single();
-    if (updateError) throw updateError;
+      .update({
+        status: "ready",
+        storage_key: storageKey,
+        file_name: file.name || safeName,
+        mime_type: file.type || "application/octet-stream",
+        size_bytes: file.size,
+      }).eq("id", work.id).select().single();
+    if (updateError) {
+      await client.storage.from("artworks").remove([storageKey]).catch(() => {});
+      await client.from("works").update({ status: "failed", storage_key: null }).eq("id", work.id).catch(() => {});
+      throw updateError;
+    }
     return ready;
   }
 
