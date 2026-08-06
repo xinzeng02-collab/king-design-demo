@@ -7,7 +7,7 @@ function json(body, status = 200) {
   });
 }
 
-export default async function handler(request) {
+async function handle(request) {
   if (request.method !== "POST" || request.headers.get("x-bootstrap-secret") !== bootstrapSecret) {
     return json({ error: "NOT_FOUND" }, 404);
   }
@@ -45,4 +45,16 @@ export default async function handler(request) {
   } catch (error) {
     return json({ error: "BOOTSTRAP_FAILED", detail: String(error.message || error) }, 500);
   }
+}
+
+export default async function handler(req, res) {
+  if (!res) return handle(req);
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const body = chunks.length ? Buffer.concat(chunks) : undefined;
+  const request = new Request(`https://${req.headers.host}${req.url}`, { method: req.method, headers: req.headers, body });
+  const response = await handle(request);
+  response.headers.forEach((value, name) => res.setHeader(name, value));
+  res.statusCode = response.status;
+  res.end(Buffer.from(await response.arrayBuffer()));
 }
