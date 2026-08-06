@@ -39,8 +39,26 @@ export async function authenticate(request, env) {
   const auth = request.headers.get("authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
   const payload = await verifyJwt(token, env.SUPABASE_JWT_SECRET);
-  if (!payload) return null;
-  return { userId: payload.sub, email: payload.email, raw: payload };
+  if (payload) return { userId: payload.sub, email: payload.email, raw: payload };
+
+  // New Supabase projects can use asymmetric signing keys, for which a legacy
+  // JWT secret is unavailable. Ask Supabase to validate the bearer token in
+  // that case instead of weakening authentication or requiring a private key.
+  if (!token || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return null;
+  try {
+    const response = await fetch(`${String(env.SUPABASE_URL).replace(/\/$/, "")}/auth/v1/user`, {
+      headers: {
+        apikey: env.SUPABASE_ANON_KEY,
+        authorization: `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) return null;
+    const user = await response.json();
+    if (!user?.id) return null;
+    return { userId: user.id, email: user.email, raw: user };
+  } catch {
+    return null;
+  }
 }
 
 /**
