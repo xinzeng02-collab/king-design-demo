@@ -23,8 +23,29 @@
     return { user: data.user, profile };
   }
 
+  async function restoreLogin() {
+    const { data: sessionData, error: sessionError } = await client.auth.getSession();
+    if (sessionError) throw sessionError;
+    const user = sessionData.session?.user;
+    if (!user) return null;
+    const { data: profile, error: profileError } = await client
+      .from("profiles").select("id, role, display_name").eq("id", user.id).single();
+    if (profileError) throw profileError;
+    return { user, profile };
+  }
+
   async function listWorks() {
-    const { data, error } = await client.from("works").select("*").order("created_at", { ascending: false });
+    const { data, error } = await client.from("works")
+      .select("*, owner_profile:profiles!works_owner_id_fkey(role, display_name)")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data;
+  }
+
+  async function getWork(id) {
+    const { data, error } = await client.from("works")
+      .select("*, owner_profile:profiles!works_owner_id_fkey(role, display_name)")
+      .eq("id", id).single();
     if (error) throw error;
     return data;
   }
@@ -85,11 +106,11 @@
     return data.signedUrl;
   }
 
-  function subscribeWorks(handler) {
+  function subscribeWorks(handler, statusHandler) {
     return client.channel("works-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "works" }, handler)
-      .subscribe();
+      .subscribe((status, error) => statusHandler?.(status, error));
   }
 
-  window.KingCloud = { client, login, listWorks, updateWork, deleteWork, uploadWork, createPreviewUrl, subscribeWorks };
+  window.KingCloud = { client, login, restoreLogin, listWorks, getWork, updateWork, deleteWork, uploadWork, createPreviewUrl, subscribeWorks };
 })();

@@ -1,10 +1,10 @@
-// Public UI demo only. It deliberately has no network API, NAS, database, or desktop integration.
+// Public cloud demo. Business works use Supabase; legacy modules remain browser-local until migrated.
 window.KING_RELEASE_CONFIG = Object.freeze({
   deployment: "public-demo",
   useBackendAuth: false,
   apiBaseUrl: "",
   enabledEmployeeRoles: ["管理员", "设计师", "手绘师", "销售"],
-  seedDemoData: true,
+  seedDemoData: false,
   seedCaseLibrary: false,
   showDemoShortcuts: true,
   showClientReviewEntry: false,

@@ -2280,9 +2280,13 @@ const roleDashboardTitles = {
 const RELEASE_CONFIG = window.KING_RELEASE_CONFIG || {};
 if (RELEASE_CONFIG.seedDemoData === false) {
   try {
-    const resetKey = "king_nas_empty_state_reset_v2";
+    const resetKey = "king_cloud_only_state_reset_v3";
     if (localStorage.getItem(resetKey) !== "1") {
+      const cloudAuthEntries = Object.keys(localStorage)
+        .filter((key) => /^sb-.*-auth-token$/i.test(key))
+        .map((key) => [key, localStorage.getItem(key)]);
       localStorage.clear();
+      cloudAuthEntries.forEach(([key, value]) => value != null && localStorage.setItem(key, value));
       localStorage.setItem(resetKey, "1");
     }
   } catch (error) {
@@ -2307,11 +2311,28 @@ let backendRealtimeSocket = null;
 let backendRealtimeReconnectTimer = null;
 const backendRealtimeSeen = new Set();
 let cloudRealtimeChannel = null;
+let cloudSnapshotPromise = null;
 const CLOUD_ROLE_LABELS = { admin: "管理员", designer: "设计师", painter: "手绘师", sales: "销售" };
 
 async function renderCloudWork(record) {
   if (!record?.id) return;
+  const cloudRole = CLOUD_ROLE_LABELS[record.owner_profile?.role] || "设计师";
+  const cloudOwnerName = record.owner_profile?.display_name || record.owner_id;
+  if (record.owner_id && !teamMembers.some((member) => member.ownerKey === record.owner_id)) {
+    teamMembers.push({
+      ownerKey: record.owner_id,
+      name: cloudOwnerName,
+      role: cloudRole,
+      tone: "blue",
+      baseLoadScore: 0,
+      accountStatus: "正常",
+    });
+  }
   const existing = document.querySelector(`[data-cloud-id="${CSS.escape(record.id)}"]`);
+  if (existing) {
+    existing.dataset.workRole = cloudRole;
+    existing.dataset.workOwner = record.owner_id;
+  }
   let imageData = "";
   try { imageData = await window.KingCloud?.createPreviewUrl(record.storage_key); } catch {}
   if (existing) {
@@ -2351,7 +2372,7 @@ async function renderCloudWork(record) {
   }
   const card = createWorkCard({
     file: `cloud-${record.id.slice(0, 8)}`,
-    role: "设计师",
+    role: cloudRole,
     owner: record.owner_id,
     generated: true,
     version: new Date(record.created_at).toLocaleString("zh-CN"),
@@ -2382,24 +2403,36 @@ async function renderCloudWork(record) {
   return card;
 }
 
+async function reconcileCloudWorks() {
+  if (!window.KingCloud) return;
+  if (cloudSnapshotPromise) return cloudSnapshotPromise;
+  cloudSnapshotPromise = (async () => {
+    const works = await window.KingCloud.listWorks();
+    const staleUploadCutoff = Date.now() - 10 * 60 * 1000;
+    works.filter((work) => work.status === "uploading" && new Date(work.created_at).getTime() < staleUploadCutoff)
+      .forEach((work) => window.KingCloud.updateWork?.(work.id, { status: "failed" }).catch(() => {}));
+    const cloudIds = new Set(works.map((work) => work.id));
+    // In the public cloud build, Supabase is the only source for works. Remove
+    // legacy local cards and cloud cards deleted while this client was offline.
+    if (RELEASE_CONFIG.seedDemoData === false) {
+      document.querySelectorAll(".work-card:not([data-cloud-id])").forEach((card) => card.remove());
+    }
+    document.querySelectorAll(".work-card[data-cloud-id]").forEach((card) => {
+      if (!cloudIds.has(card.dataset.cloudId)) card.remove();
+    });
+    workCards = document.querySelectorAll("[data-work-role]");
+    for (const work of works) await renderCloudWork(work);
+    refreshWorkCards();
+    deletedWorks = [...workCards].filter((card) => card.classList.contains("deleted"))
+      .map((card) => ({ card, deletedAt: card.dataset.deletedAt || new Date().toISOString() }));
+    renderRecycleBin();
+    renderLibraryGrid();
+  })().finally(() => { cloudSnapshotPromise = null; });
+  return cloudSnapshotPromise;
+}
+
 async function startCloudRealtimeSync() {
   if (!window.KingCloud || cloudRealtimeChannel) return;
-  const works = await window.KingCloud.listWorks();
-  const staleUploadCutoff = Date.now() - 10 * 60 * 1000;
-  works.filter((work) => work.status === "uploading" && new Date(work.created_at).getTime() < staleUploadCutoff)
-    .forEach((work) => window.KingCloud.updateWork?.(work.id, { status: "failed" }).catch(() => {}));
-  // Once cloud mode is active, remove stale local copies of records that are
-  // already represented by the server. Otherwise one device can display its
-  // IndexedDB image while another correctly shows the cloud record only.
-  const cloudTitles = new Set(works.map((work) => `${work.owner_id}:${work.title}`));
-  document.querySelectorAll(".work-card:not([data-cloud-id])").forEach((card) => {
-    const owner = card.dataset.workOwner || "";
-    const title = card.querySelector(".work-head strong")?.textContent.trim() || "";
-    if (cloudTitles.has(`${currentAccount.cloudUserId || owner}:${title}`)
-      || works.some((work) => work.title === title)) card.remove();
-  });
-  workCards = document.querySelectorAll("[data-work-role]");
-  for (const work of works) await renderCloudWork(work);
   cloudRealtimeChannel = window.KingCloud.subscribeWorks((payload) => {
     if (payload.eventType === "DELETE" && payload.old?.id) {
       document.querySelector(`[data-cloud-id="${CSS.escape(payload.old.id)}"]`)?.remove();
@@ -2409,8 +2442,16 @@ async function startCloudRealtimeSync() {
       renderLibraryGrid();
       return;
     }
-    if (payload.new) renderCloudWork(payload.new).catch(console.warn);
+    if (payload.new?.id) {
+      window.KingCloud.getWork(payload.new.id)
+        .then((work) => renderCloudWork(work))
+        .catch((error) => console.warn("cloud realtime refresh failed", error));
+    }
+  }, (status, error) => {
+    if (status === "SUBSCRIBED") reconcileCloudWorks().catch((syncError) => console.warn("cloud snapshot failed", syncError));
+    if (error) console.warn("cloud realtime connection error", error);
   });
+  await reconcileCloudWorks();
 }
 
 function backendAuthSession() {
@@ -4095,13 +4136,16 @@ function markWorkRecordDirty(card) {
 
 function syncDirtyWorkRecords() {
   if (!workRecordCacheReady) {
-    workCards.forEach((card) => workRecordCache.set(card.dataset.file, cardToData(card)));
+    workCards.forEach((card) => {
+      if (!card.dataset.cloudId) workRecordCache.set(card.dataset.file, cardToData(card));
+    });
     workRecordCacheReady = true;
     dirtyWorkFiles.clear();
     return;
   }
   const currentFiles = new Set();
   workCards.forEach((card) => {
+    if (card.dataset.cloudId) return;
     const file = card.dataset.file;
     currentFiles.add(file);
     if (dirtyWorkFiles.has(file) || !workRecordCache.has(file)) {
@@ -13581,6 +13625,7 @@ loginForm.addEventListener("submit", async (event) => {
         ...configured,
         role: CLOUD_ROLE_LABELS[cloud.profile.role] || configured.role,
         name: cloud.profile.display_name || configured.name,
+        ownerKey: cloud.user.id,
         cloudUserId: cloud.user.id,
       };
     } else {
@@ -17044,6 +17089,25 @@ if (requestedPortal === "client" && storedSessionContext?.account?.role !== "客
     .catch(() => {
       sessionStorage.removeItem(AUTH_SESSION_KEY);
       sessionStorage.removeItem(BACKEND_STUDIO_SYNC_KEY);
+      switchLoginPortal("employee");
+    });
+} else if (!RELEASE_CONFIG.useBackendAuth && window.KingCloud && storedSessionContext?.accountKey) {
+  const accountKey = storedSessionContext.accountKey;
+  window.KingCloud.restoreLogin()
+    .then((cloud) => {
+      if (!cloud) throw new Error("CLOUD_SESSION_MISSING");
+      const configured = demoAccounts[accountKey] || storedSessionContext.account || {};
+      applyLogin(accountKey, {
+        ...configured,
+        role: CLOUD_ROLE_LABELS[cloud.profile.role] || configured.role,
+        name: cloud.profile.display_name || configured.name,
+        ownerKey: cloud.user.id,
+        cloudUserId: cloud.user.id,
+      });
+    })
+    .catch(() => {
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(SESSION_ACCOUNT_DATA_KEY);
       switchLoginPortal("employee");
     });
 } else if (!RELEASE_CONFIG.useBackendAuth && storedSessionContext?.accountKey && storedSessionContext?.account) {
