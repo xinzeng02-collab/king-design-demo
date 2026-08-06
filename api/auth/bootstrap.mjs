@@ -1,1 +1,1 @@
-export { default } from "../../bootstrap-admin.mjs";
+export { default } from "../bootstrap-admin.mjs";
