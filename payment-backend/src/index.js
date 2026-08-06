@@ -81,6 +81,8 @@ export default {
 
       if (pathname === "/api/admin/studio-state" && method === "POST" && url.searchParams.get("action") === "provision-employee")
         return json(await authApi.provisionEmployee(repo, env, actor, body));
+      if (pathname === "/api/admin/studio-state" && method === "POST" && url.searchParams.get("action") === "deprovision-employee")
+        return json(await authApi.deprovisionEmployee(repo, env, actor, body));
 
       // ---- 管理工作台 ----
       if (pathname === "/api/admin/studio-state" && method === "GET")

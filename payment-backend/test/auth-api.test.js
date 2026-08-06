@@ -74,3 +74,44 @@ test("管理员创建员工账号会同步 Supabase 用户和岗位 membership",
   assert.match(calls[1].options.body, /designer123/);
   assert.match(calls[2].options.body, /"role":"designer"/);
 });
+
+test("管理员移出员工会撤销 organization membership 和 Supabase Auth 用户", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    if (String(url).includes("/auth/v1/admin/users?")) {
+      return new Response(JSON.stringify({ users: [{ id: "u-designer", email: "designer@king-design.local" }] }), { status: 200 });
+    }
+    if (options.method === "DELETE") return new Response(null, { status: 204 });
+    throw new Error(`Unexpected ${url}`);
+  };
+  const result = await authApi.deprovisionEmployee(
+    {},
+    { ...env, SUPABASE_SERVICE_ROLE_KEY: "service-key" },
+    { userId: "u-admin", role: "admin", organizationId: "org1" },
+    { username: "designer" },
+  );
+  assert.equal(result.removed, true);
+  assert.match(calls[1].url, /\/rest\/v1\/memberships\?user_id=eq\.u-designer&organization_id=eq\.org1/);
+  assert.equal(calls[1].options.method, "DELETE");
+  assert.match(calls[2].url, /\/auth\/v1\/admin\/users\/u-designer$/);
+  assert.equal(calls[2].options.method, "DELETE");
+});
+
+test("管理员不能通过接口移除自己的云端账号", async () => {
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/auth/v1/admin/users?")) {
+      return new Response(JSON.stringify({ users: [{ id: "u-admin", email: "admin@king-design.local" }] }), { status: 200 });
+    }
+    throw new Error(`Unexpected ${url}`);
+  };
+  await assert.rejects(
+    authApi.deprovisionEmployee(
+      {},
+      { ...env, SUPABASE_SERVICE_ROLE_KEY: "service-key" },
+      { userId: "u-admin", role: "admin", organizationId: "org1" },
+      { username: "admin" },
+    ),
+    /CANNOT_REMOVE_SELF/,
+  );
+});

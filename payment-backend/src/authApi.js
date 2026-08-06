@@ -122,3 +122,24 @@ export async function provisionEmployee(repo, env, actor, { username, password, 
   });
   return { ok: true, created: !existing, userId: user.id, role: backendRole, membership: membershipResponse };
 }
+
+export async function deprovisionEmployee(repo, env, actor, { username }) {
+  if (!actor?.userId || !["admin", "boss"].includes(actor.role)) throw fail("FORBIDDEN_ADMIN_ONLY", 403);
+  if (!actor.organizationId) throw fail("ORGANIZATION_NOT_FOUND", 404);
+  const loginName = String(username || "").trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]{2,23}$/.test(loginName)) throw fail("INVALID_USERNAME");
+  const email = `${loginName}@${env.AUTH_EMAIL_DOMAIN || "king-design.local"}`;
+  const users = await supabaseAdminRequest(env, "/auth/v1/admin/users?per_page=1000");
+  const existing = (users.users || []).find((user) => String(user.email || "").toLowerCase() === email);
+  if (!existing) return { ok: true, removed: false };
+  if (existing.id === actor.userId) throw fail("CANNOT_REMOVE_SELF", 409);
+
+  const userId = encodeURIComponent(existing.id);
+  const organizationId = encodeURIComponent(actor.organizationId);
+  await supabaseAdminRequest(env, `/rest/v1/memberships?user_id=eq.${userId}&organization_id=eq.${organizationId}`, {
+    method: "DELETE",
+    headers: { prefer: "return=minimal" },
+  });
+  await supabaseAdminRequest(env, `/auth/v1/admin/users/${userId}`, { method: "DELETE" });
+  return { ok: true, removed: true, userId: existing.id };
+}

@@ -258,7 +258,7 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-cloud-commit-v3/);
+  assert.match(html, /script\.js\?v=20260807-employee-auth-v4/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
@@ -268,6 +268,9 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   assert.match(script, /await saveStudioStateToCloud\(\)/);
   assert.match(script, /logoutButton\.addEventListener\("click", async[\s\S]*?await backendLastSyncAttempt/);
   assert.match(script, /return saveStudioStateNow\(\);/);
+  assert.match(script, /function deprovisionBackendEmployeeAccount/);
+  assert.match(script, /action=deprovision-employee/);
+  assert.match(script, /await deprovisionBackendEmployeeAccount\(\{ username: member\.ownerKey \}\)/);
 });
 
 test("客户、员工、订单、作品及评审关系都进入云端状态模块", async () => {

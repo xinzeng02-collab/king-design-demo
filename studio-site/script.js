@@ -2493,6 +2493,14 @@ async function provisionBackendEmployeeAccount({ username, password, role, name 
   });
 }
 
+async function deprovisionBackendEmployeeAccount({ username }) {
+  if (!RELEASE_CONFIG.useBackendAuth) return null;
+  return backendApi("/api/admin/studio-state?action=deprovision-employee", {
+    method: "POST",
+    body: JSON.stringify({ username }),
+  });
+}
+
 async function uploadBackendStudioAsset(key, imageData) {
   const ticket = await backendStudioAsset(key, { method: "POST", action: "sign-upload", headers: { "content-type": "application/json" } });
   const { signedUrl } = await ticket.json();
@@ -15372,16 +15380,23 @@ teamGrid?.addEventListener("click", (event) => {
       title: `将「${member.name}」移出团队？`,
       message: "移出后，该成员将不再出现在团队成员库中。",
       submitText: "确认移出",
-      onConfirm: () => {
-        teamMembers.splice(index, 1);
-        const accounts = readRegisteredAccounts();
-        delete accounts[member.ownerKey];
-        writeRegisteredAccounts(accounts);
-        delete demoAccounts[member.ownerKey];
-        saveStudioState();
-        syncProjectMemberOptions();
-        renderTeamView();
-        showToast(`${member.name} 已移出团队。`, "success");
+      onConfirm: async () => {
+        try {
+          await deprovisionBackendEmployeeAccount({ username: member.ownerKey });
+          const currentIndex = teamMembers.findIndex((item) => item.ownerKey === member.ownerKey);
+          if (currentIndex >= 0) teamMembers.splice(currentIndex, 1);
+          const accounts = readRegisteredAccounts();
+          delete accounts[member.ownerKey];
+          writeRegisteredAccounts(accounts);
+          delete demoAccounts[member.ownerKey];
+          await saveStudioStateToCloud();
+          syncProjectMemberOptions();
+          renderTeamView();
+          showToast(`${member.name} 的云端账号已撤销，并已移出团队。`, "success");
+        } catch (error) {
+          console.warn("Deprovision employee failed", error);
+          showToast("云端账号撤销失败，员工暂未移出，请重试。", "warning");
+        }
       },
     });
   }
