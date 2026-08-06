@@ -2314,6 +2314,7 @@ const demoAccounts = {
 };
 const AUTH_SESSION_KEY = "king_backend_auth_session_v1";
 const BACKEND_STUDIO_SYNC_KEY = "king_backend_studio_sync_v1";
+const BACKEND_LOGIN_RELOAD_KEY = "king_backend_login_reload_v1";
 const NAS_SYNC_TIME_KEY = "king_nas_sync_time_v1";
 let backendSyncQueue = Promise.resolve();
 let salesLibraryRefreshPromise = null;
@@ -13605,7 +13606,11 @@ loginForm.addEventListener("submit", async (event) => {
     if (!account) throw Object.assign(new Error("INVALID_CREDENTIALS"), { code: "INVALID_CREDENTIALS" });
     if (account.accountStatus === "已停用") throw Object.assign(new Error("ACCOUNT_DISABLED"), { code: "ACCOUNT_DISABLED" });
     if (!RELEASE_CONFIG.enabledEmployeeRoles?.includes(account.role)) throw Object.assign(new Error("ROLE_NOT_ENABLED"), { code: "ROLE_NOT_ENABLED" });
-    if (RELEASE_CONFIG.useBackendAuth && await pullBackendStudioState({ reloadWhenChanged: true })) return;
+    if (RELEASE_CONFIG.useBackendAuth && await pullBackendStudioState()) {
+      sessionStorage.setItem(BACKEND_LOGIN_RELOAD_KEY, "1");
+      location.reload();
+      return;
+    }
     if (!RELEASE_CONFIG.useBackendAuth) saveRememberedLogin("employee", accountKey, passwordInput.value, employeeRememberPassword.checked);
     applyLogin(accountKey, account);
     return;
@@ -17013,13 +17018,26 @@ if (requestedPortal === "client" && storedSessionContext?.account?.role !== "客
   switchLoginPortal("employee");
 } else if (RELEASE_CONFIG.useBackendAuth && backendAuthSession()?.account) {
   const sessionAccount = backendAuthSession().account;
-  pullBackendStudioState({ reloadWhenChanged: true })
-    .then((changed) => { if (!changed) applyLogin(sessionAccount.username, sessionAccount); })
-    .catch(() => {
-      sessionStorage.removeItem(AUTH_SESSION_KEY);
-      sessionStorage.removeItem(BACKEND_STUDIO_SYNC_KEY);
-      switchLoginPortal("employee");
-    });
+  if (sessionStorage.getItem(BACKEND_LOGIN_RELOAD_KEY) === "1") {
+    sessionStorage.removeItem(BACKEND_LOGIN_RELOAD_KEY);
+    applyLogin(sessionAccount.username, sessionAccount);
+  } else {
+    pullBackendStudioState()
+      .then((changed) => {
+        if (!changed) {
+          applyLogin(sessionAccount.username, sessionAccount);
+          return;
+        }
+        sessionStorage.setItem(BACKEND_LOGIN_RELOAD_KEY, "1");
+        location.reload();
+      })
+      .catch(() => {
+        sessionStorage.removeItem(AUTH_SESSION_KEY);
+        sessionStorage.removeItem(BACKEND_STUDIO_SYNC_KEY);
+        sessionStorage.removeItem(BACKEND_LOGIN_RELOAD_KEY);
+        switchLoginPortal("employee");
+      });
+  }
 } else if (!RELEASE_CONFIG.useBackendAuth && storedSessionContext?.accountKey && storedSessionContext?.account) {
   const freshAccount = demoAccounts[storedSessionContext.accountKey] || storedSessionContext.account;
   if (freshAccount.accountStatus === "已停用") {

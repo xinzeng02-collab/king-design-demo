@@ -258,12 +258,22 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260806-cloud-sync-v1/);
+  assert.match(html, /script\.js\?v=20260807-login-loop-v1/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
-  assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?method: "PUT"/);
+  assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
+  assert.match(script, /request\.open\("PUT", signedUrl\)/);
   assert.match(script, /function mergeStudioModule\(module, remoteValue, localValue\)/);
   assert.match(script, /valueToSend = mergeStudioModule\(module, backendSyncMeta\(\)\?\.state\?\.\[module\], valueToSend\)/);
   assert.match(script, /return saveStudioStateNow\(\);/);
+});
+
+test("云端登录加载状态后最多刷新一次", async () => {
+  const script = await read("script.js");
+
+  assert.match(script, /BACKEND_LOGIN_RELOAD_KEY/);
+  assert.match(script, /sessionStorage\.setItem\(BACKEND_LOGIN_RELOAD_KEY, "1"\);\s*location\.reload\(\)/);
+  assert.match(script, /sessionStorage\.getItem\(BACKEND_LOGIN_RELOAD_KEY\) === "1"/);
+  assert.match(script, /sessionStorage\.removeItem\(BACKEND_LOGIN_RELOAD_KEY\);\s*applyLogin\(sessionAccount\.username, sessionAccount\)/);
 });
 
 test("未关闭订单中的花型不会再次出现在花型库", async () => {
