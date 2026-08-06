@@ -2317,6 +2317,7 @@ const BACKEND_STUDIO_SYNC_KEY = "king_backend_studio_sync_v1";
 const BACKEND_LOGIN_RELOAD_KEY = "king_backend_login_reload_v1";
 const NAS_SYNC_TIME_KEY = "king_nas_sync_time_v1";
 let backendSyncQueue = Promise.resolve();
+let backendLastSyncAttempt = Promise.resolve();
 let salesLibraryRefreshPromise = null;
 let nasSyncWriteQueue = Promise.resolve();
 let backendSyncPollTimer = null;
@@ -2601,13 +2602,35 @@ async function pushBackendStudioModules(previousState, nextState) {
 }
 
 function queueBackendStudioSync(previousState, nextState) {
-  if (!RELEASE_CONFIG.useBackendAuth) return;
-  backendSyncQueue = backendSyncQueue
-    .then(() => pushBackendStudioModules(previousState, nextState))
+  if (!RELEASE_CONFIG.useBackendAuth) {
+    backendLastSyncAttempt = Promise.resolve();
+    return backendLastSyncAttempt;
+  }
+  const syncWithRetry = async () => {
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await pushBackendStudioModules(previousState, nextState);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+      }
+    }
+    throw lastError;
+  };
+  backendLastSyncAttempt = backendSyncQueue.then(syncWithRetry);
+  backendSyncQueue = backendLastSyncAttempt
     .catch((error) => {
       console.warn("Backend studio sync failed", error);
       showToast?.("数据暂未同步到服务器，将在下次保存时重试。", "warning");
     });
+  return backendLastSyncAttempt;
+}
+
+async function saveStudioStateToCloud() {
+  if (!saveStudioState()) throw Object.assign(new Error("STUDIO_STATE_SAVE_FAILED"), { code: "STUDIO_STATE_SAVE_FAILED" });
+  if (RELEASE_CONFIG.useBackendAuth) await backendLastSyncAttempt;
 }
 
 const ROUTABLE_VIEWS = new Set(["dashboard", "review", "team", "projects", "designer", "adminWorks", "library", "cart", "orders", "sleep", "recycle", "resources", "myLibrary", "myOrders"]);
@@ -10526,7 +10549,7 @@ async function appendWorkImages(card, files) {
   activeMediaKind = "image";
   activeWorkImageIndex = existingEntries.length - accepted.length;
   markWorkRecordDirty(card);
-  saveStudioState();
+  await saveStudioStateToCloud();
   renderWorkImageOptions(card);
   applyWorkImage(card, activeWorkImageIndex);
   updateLightboxMediaMeta(card);
@@ -15215,7 +15238,7 @@ employeeAccountForm?.addEventListener("submit", async (event) => {
       }
     }
     syncProjectMemberOptions();
-    saveStudioState();
+    await saveStudioStateToCloud();
     renderTeamView();
     showEmployeeCredentialResults(results);
     showToast(`已为 ${results.length} 位员工设置账号。`, "success");
@@ -15291,7 +15314,7 @@ employeeAccountForm?.addEventListener("submit", async (event) => {
     localStorage.setItem(SESSION_ACCOUNT_DATA_KEY, JSON.stringify({ accountKey: username, account: { ...currentAccount } }));
   }
   syncProjectMemberOptions();
-  saveStudioState();
+  await saveStudioStateToCloud();
   renderTeamView();
   if (wasEditing) {
     closeEmployeeAccountModal();
@@ -16418,7 +16441,7 @@ uploadConfirm.addEventListener("click", async () => {
       });
     }
     refreshWorkCards();
-    saveStudioState();
+    await saveStudioStateToCloud();
     configureWorksView(roleSelect.value, currentAccount.ownerKey);
     sortWorkCards();
     renderRecycleBin();
@@ -16510,7 +16533,7 @@ replaceImageInput.addEventListener("change", async () => {
     const verSpan = replaceTargetCard.querySelector(".version-row span:first-child");
     if (verSpan) verSpan.textContent = `版本 ${nowText}`;
     enhanceOneWorkCard(replaceTargetCard);
-    saveStudioState();
+    await saveStudioStateToCloud();
     showToast(`已替换为一花 ${files.length} 色。`, "success");
   } catch (error) {
     console.error(error);
@@ -17166,9 +17189,19 @@ profileAvatarInput?.addEventListener("change", async () => {
   profileAvatarInput.value = "";
 });
 
-logoutButton.addEventListener("click", () => {
+logoutButton.addEventListener("click", async () => {
   // 切换账号前立即落盘，确保管理员刚完成的审核结果能被创作者账号读到。
   flushStudioState();
+  if (RELEASE_CONFIG.useBackendAuth) {
+    showAppLoading("正在同步云端数据…");
+    try {
+      await backendLastSyncAttempt;
+    } catch (error) {
+      hideAppLoading();
+      showToast("云端同步尚未完成，请保持当前页面并稍后重试退出。", "error");
+      return;
+    }
+  }
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(SESSION_ACCOUNT_DATA_KEY);
   sessionStorage.removeItem(AUTH_SESSION_KEY);
@@ -17199,6 +17232,7 @@ logoutButton.addEventListener("click", () => {
   switchLoginPortal("entry");
   lockBodyScroll(false);
   releaseFileURLs();
+  hideAppLoading();
 });
 
 // 控制台首次渲染前先恢复项目数据，避免登录后项目数短暂显示为 0。

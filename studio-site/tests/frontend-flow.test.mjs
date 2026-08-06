@@ -258,13 +258,29 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-original-session-v2/);
+  assert.match(html, /script\.js\?v=20260807-cloud-commit-v3/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
   assert.match(script, /function mergeStudioModule\(module, remoteValue, localValue\)/);
   assert.match(script, /valueToSend = mergeStudioModule\(module, backendSyncMeta\(\)\?\.state\?\.\[module\], valueToSend\)/);
+  assert.match(script, /backendLastSyncAttempt = backendSyncQueue\.then\(syncWithRetry\)/);
+  assert.match(script, /await saveStudioStateToCloud\(\)/);
+  assert.match(script, /logoutButton\.addEventListener\("click", async[\s\S]*?await backendLastSyncAttempt/);
   assert.match(script, /return saveStudioStateNow\(\);/);
+});
+
+test("客户、员工、订单、作品及评审关系都进入云端状态模块", async () => {
+  const script = await read("script.js");
+  for (const module of [
+    "createdWorks", "overrides", "removedFiles", "activityNotifications", "orders",
+    "projects", "customers", "teamMembers", "personalWorkArchives", "sharedWorkspaceLocalData",
+  ]) {
+    assert.match(script, new RegExp(`${module}[,:]`));
+  }
+  assert.match(script, /linkedSketches:\s*data\.linkedSketches/);
+  assert.match(script, /reviewStatus:\s*data\.reviewStatus/);
+  assert.match(script, /sleeping:\s*data\.sleeping/);
 });
 
 test("云端登录加载状态后最多刷新一次", async () => {
