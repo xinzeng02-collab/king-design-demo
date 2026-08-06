@@ -2415,21 +2415,24 @@ async function uploadBackendStudioAsset(key, imageData) {
   const ticket = await backendStudioAsset(key, { method: "POST", action: "sign-upload", headers: { "content-type": "application/json" } });
   const { signedUrl } = await ticket.json();
   if (!signedUrl) throw Object.assign(new Error("STUDIO_ASSET_SIGN_FAILED"), { code: "STUDIO_ASSET_SIGN_FAILED" });
-  const response = await fetch(signedUrl, {
-    method: "PUT",
-    headers: {
-      "content-type": imageData?.type || "application/octet-stream",
-      "x-upsert": "true",
-    },
-    body: imageData,
+  await new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("PUT", signedUrl);
+    request.timeout = 180000;
+    request.setRequestHeader("content-type", imageData?.type || "application/octet-stream");
+    request.setRequestHeader("x-upsert", "true");
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !appLoadingText) return;
+      const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+      appLoadingText.textContent = `正在上传 ${imageData?.name || "图片"}（${percent}%）`;
+    };
+    request.onload = () => request.status >= 200 && request.status < 300
+      ? resolve()
+      : reject(Object.assign(new Error("STUDIO_ASSET_UPLOAD_FAILED"), { code: "STUDIO_ASSET_UPLOAD_FAILED", status: request.status }));
+    request.onerror = () => reject(Object.assign(new Error("STUDIO_ASSET_UPLOAD_FAILED"), { code: "STUDIO_ASSET_UPLOAD_FAILED" }));
+    request.ontimeout = () => reject(Object.assign(new Error("STUDIO_ASSET_UPLOAD_TIMEOUT"), { code: "STUDIO_ASSET_UPLOAD_TIMEOUT" }));
+    request.send(imageData);
   });
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({}));
-    throw Object.assign(new Error(detail.message || detail.error || "STUDIO_ASSET_UPLOAD_FAILED"), {
-      code: detail.error || "STUDIO_ASSET_UPLOAD_FAILED",
-      status: response.status,
-    });
-  }
 }
 
 async function pullBackendStudioState({ reloadWhenChanged = false } = {}) {
@@ -6395,6 +6398,10 @@ function configureRoleNavigation(role) {
   if (!currentActiveNav || !viewAllowedForRole(currentActiveNav, role)) {
     switchView(role === "客户" ? "myLibrary" : "dashboard");
   }
+}
+
+function canStartCustomerReview() {
+  return ["管理员", "销售"].includes(currentAccount?.role);
 }
 
 function configureWorksView(role, ownerKey, mode = activeWorksMode) {
@@ -14035,6 +14042,7 @@ reviewStatusTabs.addEventListener("click", (event) => {
   renderDailyReviewBoard();
 });
 startLibrarySession.addEventListener("click", () => {
+  if (!canStartCustomerReview()) return;
   if (!libraryCustomer.value || !libraryViewer.value.trim()) {
     libraryStatus.textContent = "请先选择客户，并填写选稿人。";
     return;
@@ -17140,6 +17148,7 @@ function renderViewerFloaters() {
 }
 
 function openViewerEntry(prefill) {
+  if (!canStartCustomerReview()) return;
   const entry = document.querySelector("#viewerEntry");
   if (!entry) return;
   const companyInput = document.querySelector("#viewerCompany");
@@ -17234,6 +17243,7 @@ function renderViewerNameSuggest() {
 
 // —— 开始看稿：保存会话 + 过渡 + 进入作品库 ——
 function startViewing() {
+  if (!canStartCustomerReview()) return;
   if (viewerStarting) return;
   const company = (document.querySelector("#viewerCompany")?.value || "").trim();
   const name = (document.querySelector("#viewerName")?.value || "").trim();
@@ -17271,6 +17281,7 @@ function startViewing() {
 }
 
 function startAnonymousViewing() {
+  if (!canStartCustomerReview()) return;
   libraryCart = new Set();
   viewerSession = {
     customerId: null,
