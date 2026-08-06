@@ -234,11 +234,11 @@ test("上传使用 Blob 存储，并保留源文件缺失提示", async () => {
   const script = await read("script.js");
   const styles = await read("styles.css");
   assert.match(script, /KingBlobStore/);
-  assert.match(script, /persistArtworkImageTiers\(fileId, mainFile\)/);
+  assert.match(script, /mapWithConcurrency\(uploadPlans, 3/);
   assert.match(script, /saveImageToDB\(originalKey, file\)/);
-  assert.match(script, /await saveImageToDB\(sourceKey, sourceFile\)/);
+  assert.match(script, /saveImageToDB\(plan\.key, plan\.file\)/);
   assert.match(script, /MAX_IMAGE_FILE_BYTES = 100 \* 1024 \* 1024/);
-  assert.match(script, /return \{ originalKey, thumbKey: originalKey, previewKey: originalKey \}/);
+  assert.match(script, /return \{ originalKey, thumbKey, previewKey: originalKey \}/);
   assert.match(script, /workImages: JSON\.stringify\(workImages\)/);
   assert.match(script, /class="upload-slot-card"[\s\S]*?class="upload-slot-add"/);
   assert.match(script, /data-upload-slot-add/);
@@ -258,7 +258,7 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-login-loop-v1/);
+  assert.match(html, /script\.js\?v=20260807-original-session-v2/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
@@ -274,6 +274,9 @@ test("云端登录加载状态后最多刷新一次", async () => {
   assert.match(script, /sessionStorage\.setItem\(BACKEND_LOGIN_RELOAD_KEY, "1"\);\s*location\.reload\(\)/);
   assert.match(script, /sessionStorage\.getItem\(BACKEND_LOGIN_RELOAD_KEY\) === "1"/);
   assert.match(script, /sessionStorage\.removeItem\(BACKEND_LOGIN_RELOAD_KEY\);\s*applyLogin\(sessionAccount\.username, sessionAccount\)/);
+  assert.match(script, /function refreshBackendAuthSession/);
+  assert.match(script, /response\.status === 401 && session\.refreshToken/);
+  assert.match(script, /短时断网或接口超时不能等同于退出登录/);
 });
 
 test("未关闭订单中的花型不会再次出现在花型库", async () => {
@@ -594,9 +597,9 @@ test("客户看稿复用大图缩放并提供触屏可见控件", async () => {
   const html = await read("index.html");
   const script = await read("script.js");
   const styles = await read("styles.css");
-  assert.match(html, /id="lightboxZoomControls"[\s\S]*?data-lightbox-zoom="out"[\s\S]*?data-lightbox-zoom="reset"[\s\S]*?data-lightbox-zoom="in"/);
-  assert.match(script, /#lightboxZoomControls[\s\S]*?changeZoom\(button\.dataset\.lightboxZoom === "in" \? 0\.5 : -0\.5\)/);
-  assert.match(script, /zoomLevel\.textContent = `\$\{Math\.round\(previewZoom \* 100\)\}%`/);
+  assert.match(html, /id="lightboxZoomControls"[\s\S]*?data-lightbox-zoom="out"[\s\S]*?data-lightbox-zoom="reset"[\s\S]*?data-lightbox-zoom="actual"[\s\S]*?data-lightbox-zoom="in"/);
+  assert.match(script, /#lightboxZoomControls[\s\S]*?showActualPreviewPixels\(\)[\s\S]*?changeZoom\(button\.dataset\.lightboxZoom === "in" \? 0\.5 : -0\.5\)/);
+  assert.match(script, /const pixelScale = lightboxImageFitScale\(\) \* previewZoom/);
   assert.match(styles, /\.lightbox\.viewer-clean \.lightbox-zoom-controls\s*\{\s*display:\s*flex/);
 });
 
@@ -604,13 +607,15 @@ test("作品详情优先加载完整预览图并防止异步切换串图", async
   const script = await read("script.js");
   const styles = await read("styles.css");
   const candidates = script.match(/function workImageCandidateKeys\(card, index = 0\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.ok(candidates.indexOf("workImage?.originalKey") < candidates.indexOf("workImage?.previewKey"));
   assert.ok(candidates.indexOf("workImage?.previewKey") < candidates.indexOf("card?.dataset.imageKey"));
   assert.match(candidates, /index === 0 \? \[[\s\S]*?\] : \[[\s\S]*?palettePreviewKey/);
   assert.match(script, /const requestId = \+\+previewImageRequestId/);
   assert.match(script, /requestId !== previewImageRequestId \|\| activeCard !== card \|\| activeMediaKind !== "palette" \|\| activeVariant !== variant/);
   assert.match(script, /function changeZoom\(delta\) \{[\s\S]*?Math\.max\(1,/);
   assert.match(script, /function changeZoomAtPointer\(delta, event\) \{[\s\S]*?Math\.max\(1,/);
-  assert.match(styles, /\.lightbox-image\.has-image\s*\{[\s\S]*?background-size:\s*contain/);
+  assert.match(styles, /#lightboxOriginalImage\s*\{[\s\S]*?object-fit:\s*scale-down/);
+  assert.match(script, /setLightboxOriginalSource\(imageData\)/);
 });
 
 test("作品预览将作品图片与其他配色分区并复用媒体缩略图组件", async () => {

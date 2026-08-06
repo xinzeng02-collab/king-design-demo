@@ -14,6 +14,7 @@
       try {
         if (sessionStorage.getItem("kingDesignBootShown")) document.documentElement.classList.add("skip-app-boot");
         else sessionStorage.setItem("kingDesignBootShown", "1");
+        if (sessionStorage.getItem("king_backend_auth_session_v1")) document.documentElement.classList.add("backend-session-restoring");
       } catch {}
     </script>
     <style>
@@ -25,6 +26,9 @@
       .app-boot-track{width:156px;height:2px;overflow:hidden;background:rgba(255,255,255,.18)}
       .app-boot-track::after{content:"";display:block;width:45%;height:100%;background:#fff;animation:app-boot-progress 1.15s cubic-bezier(.65,0,.35,1) infinite}
       .app-boot-label{margin:0;color:rgba(255,255,255,.52);font:500 10px/1 Arial,sans-serif;letter-spacing:2.5px}
+      .backend-session-restoring .login-screen{display:none!important}
+      .backend-session-restoring .app-shell.locked{display:grid}
+      .backend-session-restoring body{overflow:auto}
       @keyframes app-boot-progress{0%{transform:translateX(-110%)}100%{transform:translateX(330%)}}
       @media(prefers-reduced-motion:reduce){.app-boot-track::after{animation-duration:2.4s}}
     </style>
@@ -878,14 +882,17 @@
       <button class="lightbox-fullscreen-exit" id="lightboxExitFullscreen" type="button">返回信息</button>
       <div class="lightbox-content">
         <figure class="lightbox-figure">
-          <div class="lightbox-image" id="lightboxImage"></div>
+          <div class="lightbox-image" id="lightboxImage">
+            <img id="lightboxOriginalImage" alt="" draggable="false" hidden />
+          </div>
           <div class="lightbox-image-nav">
             <button class="lightbox-nav lightbox-prev" id="lightboxPrev" type="button" aria-label="上一张"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 6-6 6 6 6"></path></svg></button>
             <button class="lightbox-nav lightbox-next" id="lightboxNext" type="button" aria-label="下一张"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 6 6 6-6 6"></path></svg></button>
           </div>
           <div class="lightbox-zoom-controls" id="lightboxZoomControls" aria-label="图片缩放">
             <button type="button" data-lightbox-zoom="out" aria-label="缩小图片">−</button>
-            <button class="lightbox-zoom-level" type="button" data-lightbox-zoom="reset" aria-label="恢复原始大小">100%</button>
+            <button class="lightbox-zoom-level" type="button" data-lightbox-zoom="reset" aria-label="适应窗口">适应</button>
+            <button class="lightbox-actual-size" type="button" data-lightbox-zoom="actual" aria-label="按原图像素查看">1:1</button>
             <button type="button" data-lightbox-zoom="in" aria-label="放大图片">＋</button>
           </div>
           <figcaption>
@@ -1425,6 +1432,6 @@
     <script src="./performance-runtime.js?v=20260727-performance-v2"></script>
     <script src="./login-portals.js?v=20260807-login-recovery-v1"></script>
     <script src="/socket.io/socket.io.js"></script>
-  <script src="./script.js?v=20260807-login-loop-v1"></script>
+  <script src="./script.js?v=20260807-original-session-v2"></script>
   </body>
 </html>

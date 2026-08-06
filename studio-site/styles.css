@@ -4670,7 +4670,23 @@ dd {
 
 .lightbox-image.has-image {
   background-repeat: no-repeat;
-  background-size: contain;
+  background-image: none !important;
+  overflow: hidden;
+}
+
+#lightboxOriginalImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: scale-down;
+  image-rendering: auto;
+  transform-origin: center;
+  user-select: none;
+  pointer-events: none;
+}
+
+#lightboxOriginalImage[hidden] {
+  display: none;
 }
 
 .lightbox-figure figcaption {
@@ -4956,10 +4972,12 @@ dd {
   position: relative;
   cursor: zoom-in;
   touch-action: none;
-  transform-origin: center;
-  will-change: transform;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.lightbox-image.has-image #lightboxOriginalImage {
+  will-change: transform;
 }
 
 .lightbox-image[data-zoomed="true"] { cursor: grab; }

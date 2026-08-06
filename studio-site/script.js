@@ -2324,9 +2324,63 @@ let nasSyncPollTimer = null;
 let backendRealtimeSocket = null;
 let backendRealtimeReconnectTimer = null;
 const backendRealtimeSeen = new Set();
+let backendAuthRefreshPromise = null;
 
 function backendAuthSession() {
   try { return JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY) || "null"); } catch { return null; }
+}
+
+function backendTokenExpiresAt(session) {
+  if (Number(session?.expiresAt) > 0) return Number(session.expiresAt);
+  try {
+    const payload = JSON.parse(atob(String(session?.accessToken || "").split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return Number(payload.exp || 0) * 1000;
+  } catch {
+    return 0;
+  }
+}
+
+function storeBackendAuthSession(session) {
+  const expiresIn = Number(session?.expiresIn || 0);
+  const normalized = {
+    ...session,
+    expiresAt: expiresIn > 0 ? Date.now() + expiresIn * 1000 : backendTokenExpiresAt(session),
+  };
+  sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(normalized));
+  return normalized;
+}
+
+function backendSessionIsExpired(session, leewayMs = 0) {
+  const expiresAt = backendTokenExpiresAt(session);
+  return Boolean(expiresAt && expiresAt <= Date.now() + leewayMs);
+}
+
+async function refreshBackendAuthSession({ force = false } = {}) {
+  const session = backendAuthSession();
+  if (!session?.refreshToken) return session;
+  if (!force && !backendSessionIsExpired(session, 90_000)) return session;
+  if (backendAuthRefreshPromise) return backendAuthRefreshPromise;
+  backendAuthRefreshPromise = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    try {
+      const response = await fetch(`${String(RELEASE_CONFIG.apiBaseUrl || "").replace(/\/$/, "")}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: session.refreshToken }),
+        signal: controller.signal,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw Object.assign(new Error(result.error || "AUTH_REFRESH_FAILED"), {
+        code: result.error || "AUTH_REFRESH_FAILED",
+        status: response.status,
+      });
+      return storeBackendAuthSession({ ...session, ...result, account: session.account });
+    } finally {
+      clearTimeout(timeout);
+    }
+  })().finally(() => { backendAuthRefreshPromise = null; });
+  return backendAuthRefreshPromise;
 }
 
 async function authenticateEmployee(username, password) {
@@ -2353,7 +2407,7 @@ async function authenticateEmployee(username, password) {
     error.code = result.error;
     throw error;
   }
-  sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(result));
+  storeBackendAuthSession(result);
   return result.account;
 }
 
@@ -2366,21 +2420,30 @@ function writeBackendSyncMeta(record) {
 }
 
 async function backendApi(path, options = {}) {
-  const session = backendAuthSession();
+  let session = await refreshBackendAuthSession().catch((error) => {
+    const current = backendAuthSession();
+    if (!backendSessionIsExpired(current)) return current;
+    throw error;
+  });
   if (!session?.accessToken) throw Object.assign(new Error("UNAUTHENTICATED"), { code: "UNAUTHENTICATED" });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
   let response;
   try {
-    response = await fetch(`${String(RELEASE_CONFIG.apiBaseUrl || "").replace(/\/$/, "")}${path}`, {
-      ...options,
-      headers: {
-        authorization: `Bearer ${session.accessToken}`,
-        "content-type": "application/json",
-        ...(options.headers || {}),
-      },
-      signal: controller.signal,
-    });
+    const request = () => fetch(`${String(RELEASE_CONFIG.apiBaseUrl || "").replace(/\/$/, "")}${path}`, {
+        ...options,
+        headers: {
+          authorization: `Bearer ${session.accessToken}`,
+          "content-type": "application/json",
+          ...(options.headers || {}),
+        },
+        signal: controller.signal,
+      });
+    response = await request();
+    if (response.status === 401 && session.refreshToken) {
+      session = await refreshBackendAuthSession({ force: true });
+      response = await request();
+    }
   } catch (error) {
     throw Object.assign(new Error(error?.name === "AbortError" ? "BACKEND_REQUEST_TIMEOUT" : "BACKEND_REQUEST_FAILED"), {
       code: error?.name === "AbortError" ? "BACKEND_REQUEST_TIMEOUT" : "BACKEND_REQUEST_FAILED",
@@ -2397,19 +2460,36 @@ async function backendApi(path, options = {}) {
 }
 
 async function backendStudioAsset(key, options = {}) {
-  const session = backendAuthSession();
+  let session = await refreshBackendAuthSession().catch((error) => {
+    const current = backendAuthSession();
+    if (!backendSessionIsExpired(current)) return current;
+    throw error;
+  });
   if (!session?.accessToken) throw Object.assign(new Error("UNAUTHENTICATED"), { code: "UNAUTHENTICATED" });
   const { action, ...fetchOptions } = options;
   const query = `${action ? `action=${encodeURIComponent(action)}&` : ""}key=${encodeURIComponent(key)}`;
-  const response = await fetch(`${String(RELEASE_CONFIG.apiBaseUrl || "").replace(/\/$/, "")}/api/admin/studio-assets?${query}`, {
-    ...fetchOptions,
-    headers: { authorization: `Bearer ${session.accessToken}`, ...(options.headers || {}) },
-  });
+  const request = () => fetch(`${String(RELEASE_CONFIG.apiBaseUrl || "").replace(/\/$/, "")}/api/admin/studio-assets?${query}`, {
+      ...fetchOptions,
+      headers: { authorization: `Bearer ${session.accessToken}`, ...(options.headers || {}) },
+    });
+  let response = await request();
+  if (response.status === 401 && session.refreshToken) {
+    session = await refreshBackendAuthSession({ force: true });
+    response = await request();
+  }
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
     throw Object.assign(new Error(detail.error || "STUDIO_ASSET_REQUEST_FAILED"), { code: detail.error, status: response.status });
   }
   return response;
+}
+
+async function provisionBackendEmployeeAccount({ username, password, role, name }) {
+  if (!RELEASE_CONFIG.useBackendAuth) return null;
+  return backendApi("/api/admin/employee-account", {
+    method: "POST",
+    body: JSON.stringify({ username, password: password || "", role, name }),
+  });
 }
 
 async function uploadBackendStudioAsset(key, imageData) {
@@ -3158,6 +3238,7 @@ const exitConfirmTitle = document.querySelector("#exitConfirmTitle");
 const exitConfirmMessage = document.querySelector("#exitConfirmMessage");
 const lightbox = document.querySelector("#imageLightbox");
 const lightboxImage = document.querySelector("#lightboxImage");
+const lightboxOriginalImage = document.querySelector("#lightboxOriginalImage");
 const lightboxTitle = document.querySelector("#lightboxTitle");
 const lightboxMeta = document.querySelector("#lightboxMeta");
 const lightboxFile = document.querySelector("#lightboxFile");
@@ -3248,6 +3329,7 @@ let selectionCarts = [];
 let previewZoom = 1;
 let previewOffsetX = 0;
 let previewOffsetY = 0;
+const MAX_PREVIEW_ZOOM = 12;
 let cardInfoHidden = false;
 let dragStart = null;
 let suppressPreviewClick = false;
@@ -3783,6 +3865,20 @@ function canvasBlob(canvas, type, quality) {
   });
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 async function createImageVariantBlob(file, maxSize, square = false, quality = 0.84) {
   const bitmap = await createImageBitmap(file);
   try {
@@ -3820,10 +3916,25 @@ async function createImageVariantBlob(file, maxSize, square = false, quality = 0
 
 async function persistArtworkImageTiers(baseKey, file) {
   const originalKey = `${baseKey}__original`;
-  // 使用原图作为列表、预览和下载的唯一来源。NAS 加密目录中的文件不再经过
-  // 浏览器解码/压缩，避免文件已选中却因生成缩略图失败而无法创建作品。
-  await saveImageToDB(originalKey, file);
-  return { originalKey, thumbKey: originalKey, previewKey: originalKey };
+  const thumbKey = `${baseKey}__thumb`;
+  // 原图始终按 File 原字节上传；缩略图只服务列表，详情与下载不使用它。
+  const originalUpload = saveImageToDB(originalKey, file);
+  try {
+    const thumbBlob = await createImageVariantBlob(file, 960, false, 0.88);
+    const thumbFile = new File([thumbBlob], `${fileBaseName(file.name || baseKey)}-thumb.webp`, {
+      type: thumbBlob.type || "image/webp",
+      lastModified: file.lastModified || Date.now(),
+    });
+    await Promise.all([
+      originalUpload,
+      saveImageToDB(thumbKey, thumbFile, { waitForLocalCache: true }),
+    ]);
+    return { originalKey, thumbKey, previewKey: originalKey };
+  } catch (error) {
+    await originalUpload;
+    console.warn("缩略图生成失败，列表暂时回退到原图。", error);
+    return { originalKey, thumbKey: originalKey, previewKey: originalKey };
+  }
 }
 
 function openImageDB() {
@@ -3841,27 +3952,35 @@ function openImageDB() {
   });
 }
 
-async function saveImageToDB(key, imageData) {
+async function saveImageToDB(key, imageData, { waitForLocalCache = false } = {}) {
   if (!imageData) return;
-  if (window.KingBlobStore?.put) {
-    await window.KingBlobStore.put(key, imageData, {
+  const cacheWrite = window.KingBlobStore?.put
+    ? window.KingBlobStore.put(key, imageData, {
       name: imageData?.name || "",
       type: imageData?.type || "",
-    });
-  } else {
-    const database = await openImageDB();
-    await new Promise((resolve, reject) => {
-      const tx = database.transaction("images", "readwrite");
-      tx.objectStore("images").put({ key, imageData });
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
-    database.close();
-  }
+    })
+    : (async () => {
+        const database = await openImageDB();
+        await new Promise((resolve, reject) => {
+          const tx = database.transaction("images", "readwrite");
+          tx.objectStore("images").put({ key, imageData });
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error);
+        });
+        database.close();
+      })();
   // 云端模式中，图片必须在作品元数据保存前进入 R2；本地 IndexedDB 只作缓存。
   if (RELEASE_CONFIG.useBackendAuth) {
-    await uploadBackendStudioAsset(key, imageData);
+    const upload = uploadBackendStudioAsset(key, imageData);
+    if (waitForLocalCache) {
+      await Promise.all([upload, cacheWrite]);
+    } else {
+      await upload;
+      cacheWrite.catch((error) => console.warn("本机图片缓存写入失败，继续使用云端原图。", error));
+    }
+    return;
   }
+  await cacheWrite;
 }
 
 async function getImageFromDB(key) {
@@ -9997,17 +10116,40 @@ function renderDailyReviewBoard() {
   observeGalleryAutoLoad(reviewBoard);
 }
 
+function lightboxImageFitScale() {
+  if (!lightboxOriginalImage?.naturalWidth || !lightboxOriginalImage?.naturalHeight) return 1;
+  const width = lightboxImage.clientWidth || 1;
+  const height = lightboxImage.clientHeight || 1;
+  return Math.min(1, width / lightboxOriginalImage.naturalWidth, height / lightboxOriginalImage.naturalHeight);
+}
+
+function setLightboxOriginalSource(source) {
+  if (!lightboxOriginalImage) return;
+  const nextSource = String(source || "");
+  if (!nextSource) {
+    lightboxOriginalImage.hidden = true;
+    lightboxOriginalImage.removeAttribute("src");
+    lightboxOriginalImage.style.transform = "";
+    return;
+  }
+  lightboxOriginalImage.hidden = false;
+  if (lightboxOriginalImage.getAttribute("src") !== nextSource) lightboxOriginalImage.src = nextSource;
+}
+
 function applyPreviewZoom() {
   lightboxImage.dataset.zoomed = previewZoom > 1.01 ? "true" : "false";
   lightboxImage.removeAttribute("title");
-  const zoomLevel = document.querySelector(".lightbox-zoom-level");
-  if (zoomLevel) zoomLevel.textContent = `${Math.round(previewZoom * 100)}%`;
+  const zoomLevel = lightbox.querySelector(".lightbox-zoom-level");
+  const pixelScale = lightboxImageFitScale() * previewZoom;
+  if (zoomLevel) zoomLevel.textContent = lightboxOriginalImage?.hidden ? `${Math.round(previewZoom * 100)}%` : `${Math.round(pixelScale * 100)}%`;
   if (lightboxImage.classList.contains("has-image")) {
-    lightboxImage.style.backgroundSize = "contain";
+    lightboxImage.style.backgroundImage = "";
     lightboxImage.style.backgroundPosition = "center";
-    lightboxImage.style.transform = `matrix(${previewZoom}, 0, 0, ${previewZoom}, ${previewOffsetX}, ${previewOffsetY})`;
+    lightboxImage.style.transform = "";
+    lightboxOriginalImage.style.transform = `matrix(${previewZoom}, 0, 0, ${previewZoom}, ${previewOffsetX}, ${previewOffsetY})`;
     return;
   } else {
+    if (lightboxOriginalImage) lightboxOriginalImage.style.transform = "";
     const tileSize = Math.round(120 * previewZoom);
     lightboxImage.style.backgroundSize = `${tileSize}px ${tileSize}px, cover`;
   }
@@ -10035,7 +10177,8 @@ async function applyVariant(card, variant) {
         variant > 1 ? `variant-${variant}` : ""
       }`;
   lightboxImage.dataset.fileType = imageData && !canPreview ? paletteFileExtension({ name: paletteEntry?.name || "FILE" }) : "";
-  lightboxImage.style.backgroundImage = imageData && canPreview ? `url("${imageData}")` : "";
+  setLightboxOriginalSource(imageData && canPreview ? imageData : "");
+  lightboxImage.style.backgroundImage = "";
   applyPreviewZoom();
 }
 
@@ -10050,7 +10193,8 @@ async function applyWorkImage(card, index) {
     ? "lightbox-image has-image"
     : `lightbox-image ${sourcePattern?.className.replace("preview-trigger", "").trim() || ""}`;
   lightboxImage.dataset.fileType = "";
-  lightboxImage.style.backgroundImage = imageData ? `url("${imageData}")` : "";
+  setLightboxOriginalSource(imageData);
+  lightboxImage.style.backgroundImage = "";
   applyPreviewZoom();
 }
 
@@ -10360,10 +10504,12 @@ async function appendWorkImages(card, files) {
     showToast("作品图片已达到最大数量。", "warning");
     return;
   }
-  for (let index = 0; index < accepted.length; index += 1) {
-    const file = accepted[index];
-    const baseKey = `${card.dataset.file}__view_${existingEntries.length + index + 1}_${Date.now()}`;
-    const tiers = await persistArtworkImageTiers(baseKey, file);
+  const startedAt = Date.now();
+  const uploaded = await mapWithConcurrency(accepted, 3, async (file, index) => ({
+    file,
+    tiers: await persistArtworkImageTiers(`${card.dataset.file}__view_${existingEntries.length + index + 1}_${startedAt}`, file),
+  }));
+  uploaded.forEach(({ file, tiers }) => {
     existingEntries.push({
       name: file.name,
       purpose: `补充图 ${existingEntries.length + 1}`,
@@ -10373,7 +10519,7 @@ async function appendWorkImages(card, files) {
       type: file.type || "image/jpeg",
       primary: false,
     });
-  }
+  });
   card.dataset.workImages = JSON.stringify(existingEntries);
   card.dataset.workImagesCleared = "false";
   setReviewLog(card, "图片补充", `补充了 ${accepted.length} 张图片`, { setCurrent: false });
@@ -10836,7 +10982,7 @@ function moveLightbox(direction) {
 }
 
 function changeZoom(delta) {
-  previewZoom = Math.min(4, Math.max(1, Number((previewZoom + delta).toFixed(2))));
+  previewZoom = Math.min(MAX_PREVIEW_ZOOM, Math.max(1, Number((previewZoom + delta).toFixed(2))));
   if (previewZoom === 1) {
     previewOffsetX = 0;
     previewOffsetY = 0;
@@ -10846,7 +10992,7 @@ function changeZoom(delta) {
 
 function changeZoomAtPointer(delta, event) {
   const previousZoom = previewZoom;
-  const nextZoom = Math.min(4, Math.max(1, Number((previousZoom + delta).toFixed(2))));
+  const nextZoom = Math.min(MAX_PREVIEW_ZOOM, Math.max(1, Number((previousZoom + delta).toFixed(2))));
   if (nextZoom === previousZoom) return;
   const rect = lightboxFigure?.getBoundingClientRect() || lightboxImage.getBoundingClientRect();
   const pointerX = event.clientX - rect.left - rect.width / 2;
@@ -10864,7 +11010,7 @@ function changeZoomAtPointer(delta, event) {
 
 function setContinuousZoomAtPointer(nextZoom, event) {
   const previousZoom = previewZoom;
-  const clampedZoom = Math.min(6, Math.max(1, nextZoom));
+  const clampedZoom = Math.min(MAX_PREVIEW_ZOOM, Math.max(1, nextZoom));
   if (Math.abs(clampedZoom - previousZoom) < 0.001) return;
   const rect = lightboxFigure?.getBoundingClientRect() || lightboxImage.getBoundingClientRect();
   const centerX = rect.left + rect.width / 2;
@@ -10885,6 +11031,14 @@ function setContinuousZoomAtPointer(nextZoom, event) {
 
 function resetPreviewTransform() {
   previewZoom = 1;
+  previewOffsetX = 0;
+  previewOffsetY = 0;
+  applyPreviewZoom();
+}
+
+function showActualPreviewPixels() {
+  const fitScale = lightboxImageFitScale();
+  previewZoom = Math.min(MAX_PREVIEW_ZOOM, Math.max(1, 1 / Math.max(fitScale, 0.001)));
   previewOffsetX = 0;
   previewOffsetY = 0;
   applyPreviewZoom();
@@ -13107,6 +13261,7 @@ function applyLogin(accountKey, account) {
   // 先让遮罩真正绘制一帧，再进行页面切换和数据渲染，避免点击后像“没有反应”。
   waitForUiPaint().then(() => {
     currentAccount = { ...account };
+    document.documentElement.classList.remove("backend-session-restoring");
     localStorage.setItem(SESSION_KEY, accountKey);
     localStorage.setItem(SESSION_ACCOUNT_DATA_KEY, JSON.stringify({ accountKey, account }));
     roleSelect.value = account.role;
@@ -13521,6 +13676,10 @@ passwordRecoveryModal.addEventListener("click", (event) => {
 
 accountApplicationForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (RELEASE_CONFIG.useBackendAuth) {
+    applicationError.textContent = "云端账号请联系管理员创建。";
+    return;
+  }
   const username = applicationUsername.value.trim().toLowerCase();
   const contact = applicationContact.value.trim().toLowerCase();
   const password = applicationPassword.value;
@@ -13566,6 +13725,10 @@ accountApplicationForm.addEventListener("submit", (event) => {
 
 passwordRecoveryForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (RELEASE_CONFIG.useBackendAuth) {
+    recoveryError.textContent = "云端密码请联系管理员重置。";
+    return;
+  }
   const username = recoveryUsername.value.trim().toLowerCase();
   const account = demoAccounts[username];
   const password = recoveryPassword.value;
@@ -15015,7 +15178,7 @@ employeeAccountModal?.addEventListener("click", (event) => {
   if (event.target === employeeAccountModal) closeEmployeeAccountModal();
 });
 employeeAccountForm?.addEventListener("click", (event) => event.stopPropagation());
-employeeAccountForm?.addEventListener("submit", (event) => {
+employeeAccountForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (currentAccount.role !== "管理员") return;
   if (employeeAccountSubmit.dataset.results) {
@@ -15041,6 +15204,16 @@ employeeAccountForm?.addEventListener("submit", (event) => {
       persistEmployeeAccount(member, { password, createdAt: joinedAt });
       return { name, role, username, password };
     });
+    if (RELEASE_CONFIG.useBackendAuth) {
+      try {
+        await Promise.all(results.map((item) => provisionBackendEmployeeAccount(item)));
+      } catch (error) {
+        employeeAccountError.textContent = error?.code === "ACCOUNT_ALREADY_EXISTS"
+          ? "账号已存在，请改用编辑或更换账号。"
+          : "云端账号创建失败，请稍后重试。";
+        return;
+      }
+    }
     syncProjectMemberOptions();
     saveStudioState();
     renderTeamView();
@@ -15101,6 +15274,16 @@ employeeAccountForm?.addEventListener("submit", (event) => {
   }
   const accountPatch = { createdAt: joinedAt };
   if (password) accountPatch.password = password;
+  if (RELEASE_CONFIG.useBackendAuth) {
+    try {
+      await provisionBackendEmployeeAccount({ username, password, role, name });
+    } catch (error) {
+      employeeAccountError.textContent = error?.code === "ACCOUNT_ALREADY_EXISTS"
+        ? "账号已存在，请改用编辑或更换账号。"
+        : "云端账号保存失败，请稍后重试。";
+      return;
+    }
+  }
   persistEmployeeAccount(member, accountPatch);
   if (previousKey && previousKey !== username && currentAccount.ownerKey === previousKey) {
     currentAccount.ownerKey = username;
@@ -16102,50 +16285,67 @@ uploadConfirm.addEventListener("click", async () => {
       ? `-${Date.now().toString().slice(-4)}`
       : "";
     const fileId = editTarget?.dataset.file || `${baseName}${suffix}`;
-    const mainTiers = await persistArtworkImageTiers(fileId, mainFile);
+    const uploadStartedAt = Date.now();
+    const uploadPlans = [
+      ...files.map((file, imageIndex) => ({
+        kind: "work",
+        file,
+        index: imageIndex,
+        baseKey: file === mainFile ? fileId : `${fileId}__view_${imageIndex + 1}_${uploadStartedAt}`,
+      })),
+      ...selectedPaletteFiles.map((file, paletteIndex) => ({
+        kind: "palette",
+        file,
+        index: paletteIndex,
+        baseKey: `${fileId}__color_${paletteIndex + 2}_${uploadStartedAt}`,
+      })),
+      ...selectedReferenceFiles.filter(isImageUploadFile).map((file, refIndex) => ({
+        kind: "reference",
+        file,
+        index: refIndex,
+        key: `${fileId}__reference_${refIndex + 1}_${uploadStartedAt}`,
+      })),
+      ...selectedSourceFiles.map((file, sourceIndex) => ({
+        kind: "source",
+        file,
+        index: sourceIndex,
+        key: `${fileId}__source_${sourceIndex + 1}_${uploadStartedAt}`,
+      })),
+    ];
+    const uploadedFiles = await mapWithConcurrency(uploadPlans, 3, async (plan) => {
+      if (plan.kind === "work" || plan.kind === "palette") {
+        return { ...plan, tiers: await persistArtworkImageTiers(plan.baseKey, plan.file) };
+      }
+      await saveImageToDB(plan.key, plan.file);
+      return plan;
+    });
+    const workUploads = uploadedFiles.filter((item) => item.kind === "work");
+    const mainTiers = workUploads.find((item) => item.file === mainFile)?.tiers;
+    if (!mainTiers) throw new Error("Main artwork upload missing");
     const imageData = await resolveImageSource(mainTiers.thumbKey);
-    const workImages = [];
-    for (let imageIndex = 0; imageIndex < files.length; imageIndex += 1) {
-      const workImage = files[imageIndex];
-      const tiers = workImage === mainFile
-        ? mainTiers
-        : await persistArtworkImageTiers(`${fileId}__view_${imageIndex + 1}_${Date.now()}`, workImage);
-      workImages.push({
-        name: uploadDisplayName(workImage),
-        purpose: uploadPurpose(workImage, selectedUploadFiles.indexOf(workImage)),
-        thumbKey: tiers.thumbKey,
-        previewKey: tiers.previewKey,
-        originalKey: tiers.originalKey,
-        type: workImage.type || "image/jpeg",
-        primary: workImage === mainFile,
-      });
-    }
+    const workImages = workUploads.map(({ file: workImage, tiers }) => ({
+      name: uploadDisplayName(workImage),
+      purpose: uploadPurpose(workImage, selectedUploadFiles.indexOf(workImage)),
+      thumbKey: tiers.thumbKey,
+      previewKey: tiers.previewKey,
+      originalKey: tiers.originalKey,
+      type: workImage.type || "image/jpeg",
+      primary: workImage === mainFile,
+    }));
     const paletteKeys = [mainTiers.previewKey];
     const paletteThumbKeys = [mainTiers.thumbKey];
     const paletteFileEntries = [{ name: mainFile.name, key: mainTiers.originalKey, type: mainFile.type || "image/jpeg", primary: true }];
-    for (let paletteIndex = 0; paletteIndex < selectedPaletteFiles.length; paletteIndex += 1) {
-      const paletteFile = selectedPaletteFiles[paletteIndex];
-      const paletteBaseKey = `${fileId}__color_${paletteIndex + 2}_${Date.now()}`;
-      const paletteTiers = await persistArtworkImageTiers(paletteBaseKey, paletteFile);
-      paletteKeys.push(paletteTiers.previewKey);
-      paletteThumbKeys.push(paletteTiers.thumbKey);
-      paletteFileEntries.push({ name: paletteFile.name, key: paletteTiers.originalKey, type: paletteFile.type || "application/octet-stream", primary: false });
-    }
-    const referenceKeys = [];
-    for (let refIndex = 0; refIndex < selectedReferenceFiles.length; refIndex += 1) {
-      const referenceFile = selectedReferenceFiles[refIndex];
-      if (!isImageUploadFile(referenceFile)) continue;
-      const referenceKey = `${fileId}__reference_${refIndex + 1}_${Date.now()}`;
-      await saveImageToDB(referenceKey, referenceFile);
-      referenceKeys.push(referenceKey);
-    }
-    const storedSourceFiles = [];
-    for (let sourceIndex = 0; sourceIndex < selectedSourceFiles.length; sourceIndex += 1) {
-      const sourceFile = selectedSourceFiles[sourceIndex];
-      const sourceKey = `${fileId}__source_${sourceIndex + 1}_${Date.now()}`;
-      await saveImageToDB(sourceKey, sourceFile);
-      storedSourceFiles.push({ name: sourceFile.name, key: sourceKey, type: sourceFile.type || "application/octet-stream" });
-    }
+    uploadedFiles.filter((item) => item.kind === "palette").forEach(({ file: paletteFile, tiers }) => {
+      paletteKeys.push(tiers.previewKey);
+      paletteThumbKeys.push(tiers.thumbKey);
+      paletteFileEntries.push({ name: paletteFile.name, key: tiers.originalKey, type: paletteFile.type || "application/octet-stream", primary: false });
+    });
+    const referenceKeys = uploadedFiles.filter((item) => item.kind === "reference").map((item) => item.key);
+    const storedSourceFiles = uploadedFiles.filter((item) => item.kind === "source").map(({ file: sourceFile, key }) => ({
+      name: sourceFile.name,
+      key,
+      type: sourceFile.type || "application/octet-stream",
+    }));
     const card = createWorkCard({
       file: fileId,
       role,
@@ -16281,10 +16481,13 @@ replaceImageInput.addEventListener("change", async () => {
     const keys = [];
     const thumbKeys = [];
     const entries = [];
-    for (let index = 0; index < files.length; index += 1) {
-      const file = files[index];
-      const baseKey = `${replaceTargetCard.dataset.file}__color_${index + 1}_${Date.now()}`;
-      const tiers = await persistArtworkImageTiers(baseKey, file);
+    const startedAt = Date.now();
+    const uploaded = await mapWithConcurrency(files, 3, async (file, index) => ({
+      file,
+      tiers: await persistArtworkImageTiers(`${replaceTargetCard.dataset.file}__color_${index + 1}_${startedAt}`, file),
+    }));
+    for (let index = 0; index < uploaded.length; index += 1) {
+      const { file, tiers } = uploaded[index];
       keys.push(tiers.previewKey);
       thumbKeys.push(tiers.thumbKey);
       entries.push({ name: file.name, key: tiers.originalKey, type: file.type || "image/jpeg", primary: index === 0 });
@@ -16703,6 +16906,10 @@ emptyRecycle.addEventListener("click", () => {
   showToast("回收站已清空。", "warning");
 });
 const lightboxFigure = lightbox.querySelector(".lightbox-figure");
+lightboxOriginalImage?.addEventListener("load", applyPreviewZoom);
+window.addEventListener("resize", () => {
+  if (lightbox.classList.contains("active")) applyPreviewZoom();
+});
 lightboxFigure?.addEventListener("wheel", (event) => {
   event.preventDefault();
   event.stopPropagation();
@@ -16740,6 +16947,10 @@ document.querySelector("#lightboxZoomControls")?.addEventListener("click", (even
   event.stopPropagation();
   if (button.dataset.lightboxZoom === "reset") {
     resetPreviewTransform();
+    return;
+  }
+  if (button.dataset.lightboxZoom === "actual") {
+    showActualPreviewPixels();
     return;
   }
   changeZoom(button.dataset.lightboxZoom === "in" ? 0.5 : -0.5);
@@ -16961,6 +17172,7 @@ logoutButton.addEventListener("click", () => {
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(SESSION_ACCOUNT_DATA_KEY);
   sessionStorage.removeItem(AUTH_SESSION_KEY);
+  document.documentElement.classList.remove("backend-session-restoring");
   appShell.classList.add("locked");
   loginScreen.classList.remove("hidden");
   roleSelect.disabled = false;
@@ -17031,11 +17243,24 @@ if (requestedPortal === "client" && storedSessionContext?.account?.role !== "客
         sessionStorage.setItem(BACKEND_LOGIN_RELOAD_KEY, "1");
         location.reload();
       })
-      .catch(() => {
-        sessionStorage.removeItem(AUTH_SESSION_KEY);
-        sessionStorage.removeItem(BACKEND_STUDIO_SYNC_KEY);
-        sessionStorage.removeItem(BACKEND_LOGIN_RELOAD_KEY);
-        switchLoginPortal("employee");
+      .catch((error) => {
+        const authenticationFailed = error?.status === 401
+          || ["UNAUTHENTICATED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_REQUIRED"].includes(error?.code);
+        if (authenticationFailed) {
+          sessionStorage.removeItem(AUTH_SESSION_KEY);
+          sessionStorage.removeItem(BACKEND_STUDIO_SYNC_KEY);
+          sessionStorage.removeItem(BACKEND_LOGIN_RELOAD_KEY);
+          document.documentElement.classList.remove("backend-session-restoring");
+          appShell.classList.add("locked");
+          loginScreen.classList.remove("hidden");
+          switchLoginPortal("employee");
+          loginError.textContent = "登录已过期，请重新登录。";
+          return;
+        }
+        // 短时断网或接口超时不能等同于退出登录；先进入本地缓存的工作台，
+        // 后续轮询会继续拉取服务端权威状态。
+        applyLogin(sessionAccount.username, sessionAccount);
+        setTimeout(() => showToast?.("云端暂时无法连接，恢复网络后会自动同步。", "warning"), 0);
       });
   }
 } else if (!RELEASE_CONFIG.useBackendAuth && storedSessionContext?.accountKey && storedSessionContext?.account) {

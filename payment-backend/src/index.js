@@ -79,6 +79,9 @@ export default {
       }
       const body = ["POST", "PUT", "PATCH"].includes(method) ? await readBody(request) : {};
 
+      if (pathname === "/api/admin/employee-account" && method === "POST")
+        return json(await authApi.provisionEmployee(repo, env, actor, body));
+
       // ---- 管理工作台 ----
       if (pathname === "/api/admin/studio-state" && method === "GET")
         return json(await admin.getStudioState(repo, actor));
