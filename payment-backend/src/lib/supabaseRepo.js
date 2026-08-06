@@ -61,6 +61,23 @@ export class SupabaseRepo {
   // 成员/角色
   getMembership(userId) { return this._one(`memberships?user_id=eq.${userId}&limit=1`); }
 
+  // 管理工作台（RPC 内用 revision 做原子乐观锁）
+  getStudioState(organizationId) { return this._one(`studio_states?organization_id=eq.${organizationId}&limit=1`); }
+  async replaceStudioState(organizationId, state, revision, updatedBy) {
+    const result = await this._req("rpc/replace_studio_state", { method: "POST", body: {
+      p_organization_id: organizationId, p_state: state,
+      p_expected_revision: revision, p_updated_by: updatedBy,
+    } });
+    return Array.isArray(result) ? (result[0] || null) : result;
+  }
+  async updateStudioModule(organizationId, module, value, revision, updatedBy) {
+    const result = await this._req("rpc/update_studio_module", { method: "POST", body: {
+      p_organization_id: organizationId, p_module: module, p_value: value,
+      p_expected_revision: revision, p_updated_by: updatedBy,
+    } });
+    return Array.isArray(result) ? (result[0] || null) : result;
+  }
+
   // 看稿会话
   async createReviewSession(s) { const x = await this._req(`review_sessions`, { method: "POST", body: s, prefer: "return=representation" }); return Array.isArray(x) ? x[0] : x; }
   getReviewSession(id) { return this._one(`review_sessions?id=eq.${id}&limit=1`); }

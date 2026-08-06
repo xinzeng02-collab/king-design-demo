@@ -5,9 +5,18 @@ import { channelAvailability } from "./providers/config.js";
 import { SupabaseRepo } from "./lib/supabaseRepo.js";
 import * as core from "./core.js";
 import * as sign from "./signing.js";
+import * as admin from "./admin.js";
+import * as authApi from "./authApi.js";
+import * as studioAssets from "./studioAssets.js";
 
+const corsHeaders = () => ({
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers": "authorization, content-type",
+  "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  vary: "Origin",
+});
 const json = (data, status = 200) =>
-  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...corsHeaders() } });
 
 // 从 JWT 身份 + memberships 组装可信 actor（角色以数据库为准）
 async function buildActor(repo, identity) {
@@ -23,10 +32,16 @@ export default {
     const url = new URL(request.url);
     const { pathname } = url;
     const method = request.method;
+    if (method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
     const seg = pathname.split("/").filter(Boolean); // ["api","payments",...]
 
     try {
       if (pathname === "/api/health") return json({ ok: true, mode: env.PAYMENT_MODE || "unset", ts: Date.now() });
+
+      if (pathname === "/api/auth/login" && method === "POST")
+        return json(await authApi.login(new SupabaseRepo(env), env, await readBody(request)));
+      if (pathname === "/api/auth/refresh" && method === "POST")
+        return json(await authApi.refresh(env, await readBody(request)));
 
       if (pathname === "/api/payments/channels" && method === "GET") {
         return json({ channels: channelAvailability(env, { applePaySupported: url.searchParams.get("applePay") === "1" }) });
@@ -46,7 +61,29 @@ export default {
       if (pathname.startsWith("/api/") && !identity) return json({ error: "UNAUTHENTICATED" }, 401);
       const repo = new SupabaseRepo(env);
       const actor = await buildActor(repo, identity);
-      const body = method === "POST" ? await readBody(request) : {};
+      if (pathname === "/api/admin/studio-assets" && method === "PUT")
+        return json(await studioAssets.putStudioAsset(env, actor, url.searchParams.get("key"), request));
+      if (pathname === "/api/admin/studio-assets" && method === "DELETE")
+        return json(await studioAssets.deleteStudioAsset(env, actor, url.searchParams.get("key")));
+      if (pathname === "/api/admin/studio-assets" && method === "GET") {
+        const asset = await studioAssets.getStudioAsset(env, actor, url.searchParams.get("key"));
+        return new Response(asset.body, {
+          headers: {
+            "content-type": asset.httpMetadata?.contentType || "application/octet-stream",
+            "cache-control": "private, max-age=300",
+            ...corsHeaders(),
+          },
+        });
+      }
+      const body = ["POST", "PUT", "PATCH"].includes(method) ? await readBody(request) : {};
+
+      // ---- 管理工作台 ----
+      if (pathname === "/api/admin/studio-state" && method === "GET")
+        return json(await admin.getStudioState(repo, actor));
+      if (pathname === "/api/admin/studio-state" && method === "PUT")
+        return json(await admin.replaceStudioState(repo, body, actor));
+      if (seg[1] === "admin" && seg[2] === "studio-state" && seg[3] === "modules" && seg[4] && method === "PATCH")
+        return json(await admin.updateStudioModule(repo, { module: decodeURIComponent(seg[4]), value: body.value, revision: body.revision }, actor));
 
       // POST /api/payments/create
       if (pathname === "/api/payments/create" && method === "POST") {

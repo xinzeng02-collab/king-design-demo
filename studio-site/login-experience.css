@@ -1,10 +1,10 @@
 :root {
   --login-black: #0a0a0a;
-  --login-warm-white: #f2f0eb;
+  --login-warm-white: #f5f7fa;
   --login-text: #111111;
-  --login-muted: #77746f;
-  --login-border: #d8d5cf;
-  --login-red: #b51f28;
+  --login-muted: #6b7280;
+  --login-border: #d8dee8;
+  --login-accent: #2563eb;
 }
 
 body:has(.login-screen:not(.hidden)) {
@@ -125,7 +125,7 @@ body:has(.login-screen:not(.hidden)) {
 }
 
 .login-visual-origin i {
-  color: var(--login-red);
+  color: var(--login-accent);
   font-size: 18px;
   font-style: normal;
   line-height: 1;
@@ -218,7 +218,7 @@ body:has(.login-screen:not(.hidden)) {
 }
 
 .login-entry-copy h1 > span {
-  color: var(--login-red);
+  color: var(--login-accent);
 }
 
 .login-entry-actions {
@@ -241,6 +241,7 @@ body:has(.login-screen:not(.hidden)) {
   text-align: left;
   transition: border-color .2s ease, background-color .2s ease, color .2s ease;
 }
+.login-entry-button[hidden] { display: none !important; }
 
 .login-entry-button::after {
   content: "";
@@ -249,7 +250,7 @@ body:has(.login-screen:not(.hidden)) {
   bottom: 33px;
   width: 0;
   height: 1px;
-  background: var(--login-red);
+  background: var(--login-accent);
   transition: width .2s ease;
 }
 
@@ -265,7 +266,7 @@ body:has(.login-screen:not(.hidden)) {
 }
 
 .login-entry-button:hover {
-  border-color: var(--login-red);
+  border-color: var(--login-accent);
 }
 
 .login-entry-button:hover::after {
@@ -343,7 +344,7 @@ body:has(.login-screen:not(.hidden)) {
 }
 
 .login-back:hover {
-  color: var(--login-red);
+  color: var(--login-accent);
 }
 
 .login-back:active {
@@ -357,7 +358,7 @@ body:has(.login-screen:not(.hidden)) {
 
 .login-panel-heading .login-kicker {
   margin-bottom: 14px;
-  color: var(--login-red);
+  color: var(--login-accent);
   font-size: 10px;
   letter-spacing: .1em;
 }
@@ -430,7 +431,7 @@ body:has(.login-screen:not(.hidden)) {
 
 .login-form .login-field > input:focus,
 .login-password-control:focus-within {
-  border-color: var(--login-red);
+  border-color: var(--login-accent);
   background: rgba(255, 255, 255, .82);
   box-shadow: none;
 }
@@ -456,7 +457,7 @@ body:has(.login-screen:not(.hidden)) {
 .login-screen .login-error {
   min-height: 18px;
   margin: -8px 0 -4px;
-  color: var(--login-red);
+  color: var(--login-accent);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -516,7 +517,7 @@ body:has(.login-screen:not(.hidden)) {
 
 .login-text-action:hover,
 .login-shortcuts-head button:hover {
-  color: var(--login-red);
+  color: var(--login-accent);
 }
 
 .login-submit {
@@ -535,7 +536,7 @@ body:has(.login-screen:not(.hidden)) {
 }
 
 .login-submit:hover {
-  border-color: var(--login-red);
+  border-color: var(--login-accent);
 }
 
 .login-submit:active {
@@ -623,14 +624,14 @@ body:has(.login-screen:not(.hidden)) {
   width: min(100%, 440px);
   justify-self: center;
   margin: 0;
-  color: #99958f;
+  color: #8b95a5;
   font-family: "Helvetica Neue", Arial, sans-serif;
   font-size: 10px;
   letter-spacing: .01em;
 }
 
 .login-screen button:focus-visible {
-  outline: 1px solid var(--login-red);
+  outline: 1px solid var(--login-accent);
   outline-offset: 3px;
 }
 

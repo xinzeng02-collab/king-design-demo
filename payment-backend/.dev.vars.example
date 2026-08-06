@@ -9,6 +9,9 @@
 # ---- 运行模式 ----
 PAYMENT_MODE=test                 # test=走 MockProvider(标记 TEST) | prod=真实渠道
 APP_ENV=development               # development | staging | production
+ENABLED_EMPLOYEE_ROLES=admin,boss,designer,painter,sales
+AUTH_EMAIL_DOMAIN=king-design.local
+AUTH_EMAIL_DOMAIN=king-design.local
 
 # ---- Supabase（服务端）----
 SUPABASE_URL=                     # 项目 URL, 例 https://xxxx.supabase.co

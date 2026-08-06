@@ -48,6 +48,36 @@
 
   async function put(key, payload, metadata = {}) {
     if (!key || payload == null) return;
+    if (payload instanceof File && window.kingNas?.blobPutFile) {
+      try {
+        const saved = await window.kingNas.blobPutFile(payload, {
+          key,
+          kind: "blob",
+          name: metadata.name || payload.name || "",
+          type: metadata.type || payload.type || "application/octet-stream",
+          size: payload.size || 0,
+        });
+        if (saved !== true) throw new Error("NAS_FILE_COPY_UNAVAILABLE");
+        release(key);
+        return;
+      } catch (error) {
+        console.warn("Direct NAS file copy failed; falling back to renderer read", error);
+      }
+    }
+    if (window.kingNas?.blobPut) {
+      try {
+        const sharedRecord = payload instanceof Blob
+          ? { key, kind: "blob", bytes: new Uint8Array(await payload.arrayBuffer()), name: metadata.name || payload.name || "", type: metadata.type || payload.type, size: payload.size }
+          : { key, kind: "imageData", data: String(payload || ""), name: metadata.name || "", type: metadata.type || "text/plain", size: String(payload || "").length };
+        const saved = await window.kingNas.blobPut(sharedRecord);
+        if (saved !== true) throw new Error("NAS_BLOB_WRITE_UNAVAILABLE");
+        release(key);
+        return;
+      } catch (error) {
+        console.error("NAS blob write failed", error);
+        throw error;
+      }
+    }
     const record = payload instanceof Blob
       ? {
           key,
@@ -64,6 +94,17 @@
 
   async function getRecord(key) {
     if (!key) return null;
+    if (window.kingNas?.blobGet) {
+      try {
+        const shared = await window.kingNas.blobGet(key);
+        if (shared?.kind === "blob" && shared.bytes) {
+          return { ...shared, blob: new Blob([shared.bytes], { type: shared.type || "application/octet-stream" }) };
+        }
+        if (shared?.kind === "imageData") return { ...shared, imageData: shared.data || "" };
+      } catch (error) {
+        console.warn("NAS blob read failed; using local storage", error);
+      }
+    }
     const database = await open();
     return new Promise((resolve, reject) => {
       const tx = database.transaction(STORE_NAME, "readonly");
@@ -100,7 +141,14 @@
   async function remove(key) {
     if (!key) return;
     release(key);
+    if (window.kingNas?.blobRemove) await window.kingNas.blobRemove(key).catch(() => {});
     await transaction("readwrite", (store) => store.delete(key));
+  }
+
+  async function clear() {
+    releaseAll();
+    if (window.kingNas?.blobClear) await window.kingNas.blobClear().catch(() => {});
+    await transaction("readwrite", (store) => store.clear());
   }
 
   async function requestPersistence() {
@@ -118,6 +166,7 @@
     getRecord,
     getUrl,
     remove,
+    clear,
     release,
     releaseAll,
     requestPersistence,

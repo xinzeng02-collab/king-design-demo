@@ -42,6 +42,22 @@ npm install
 cp .dev.vars.example .dev.vars   # 填测试值即可，真实密钥留空
 npm run dev                  # http://localhost:8787/api/health
 ```
+
+## NAS 管理员认证
+
+发布版登录由 Worker 的 `POST /api/auth/login` 转交 Supabase Auth 校验，再从
+`memberships` 读取服务端角色。前端不保存管理员密码，也不能自行声明角色。
+
+首次部署数据库迁移后，用环境变量创建管理员（密码不会写入仓库）：
+
+```bash
+ADMIN_USERNAME=kingadmin ADMIN_PASSWORD='你的强密码' \
+SUPABASE_URL='https://xxx.supabase.co' SUPABASE_SERVICE_ROLE_KEY='xxx' \
+npm run create-admin
+```
+
+NAS 静态包通过 `node tools/build-nas-release.mjs` 生成到 `dist/studio-site-nas`。
+部署前把该目录内 `release-config.js` 的 `apiBaseUrl` 改成实际 Worker 地址。
 验证接口：
 - `GET /api/health` → `{ ok:true, mode:"test" }`
 - `GET /api/payments/channels` → 各渠道"暂未开放/对公可用"，测试模式带 TEST
@@ -76,3 +92,25 @@ npm run dev                  # http://localhost:8787/api/health
 2. Supabase Auth 实际接线 + memberships 角色数据
 3. RLS 策略联调 + 跨客户隔离端到端验证
 4. 把 studio-site 前端订单中心接到 `/api/*`（灰度切换，不破坏现有功能）
+
+## 管理员工作台 API
+
+迁移 `0003_admin_studio.sql` 后，管理员页面中的项目、稿件、客户、订单、团队、资源和标签可按当前前端数据结构持久化到服务端。
+
+- `GET /api/admin/studio-state`：员工读取本组织工作台状态。
+- `PUT /api/admin/studio-state`：管理员/老板替换完整状态，请求体为 `{ "state": {...}, "revision": 0 }`。
+- `PATCH /api/admin/studio-state/modules/:module`：管理员/老板只更新一个模块，请求体为 `{ "value": [...], "revision": 1 }`。
+
+每次成功写入都会使 `revision` 加一并记录审计日志。客户端遇到 HTTP `409 REVISION_CONFLICT` 时，应重新 GET 后合并，不能盲目覆盖。支持的模块名与 `studio-site/script.js` 中 `studioState` 字段一致；单次状态最大 4 MB。
+
+### 初始化四岗位测试环境
+
+执行完 `0001`、`0002`、`0003` 迁移后运行：
+
+```bash
+SUPABASE_URL='https://xxx.supabase.co' \
+SUPABASE_SERVICE_ROLE_KEY='xxx' \
+npm run initialize:test-workspace
+```
+
+脚本会幂等创建管理员、设计师、手绘师、销售账号和完整空工作台状态；已有业务状态不会被覆盖。正式使用前应通过 `ADMIN_PASSWORD`、`DESIGNER_PASSWORD`、`PAINTER_PASSWORD`、`SALES_PASSWORD` 环境变量替换测试密码。

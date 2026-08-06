@@ -54,3 +54,25 @@ test("运行时包含长任务、图片错误和对象 URL 回收监测", async 
   assert.match(runtime, /imageErrors/);
   assert.match(runtime, /releaseAll/);
 });
+
+test("客户花型库翻页不重复筛库或重绘完整选稿车", async () => {
+  const script = await readFile(path.join(siteDir, "script.js"), "utf8");
+  const galleryRenderer = script.match(/function renderVlibGallery\(reset = false\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const viewerBindings = script.match(/\(function bindViewerLibrary\(\) \{[\s\S]*?\n\}\)\(\);/)?.[0] || "";
+
+  assert.match(galleryRenderer, /if \(reset \|\| !vlibVisibleCards\.length\)/);
+  assert.doesNotMatch(galleryRenderer, /renderSignature|observeGalleryAutoLoad/);
+  assert.doesNotMatch(viewerBindings, /renderLibraryCart\(\)/);
+  assert.match(viewerBindings, /syncVlibSelectionSummary\(\)/);
+});
+
+test("客户看稿入口复用 Silk 动画并隐藏已匹配联系人建议", async () => {
+  const script = await readFile(path.join(siteDir, "script.js"), "utf8");
+  const silkInitializer = script.match(/function initViewerSilk\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const nameSuggestions = script.match(/function renderViewerNameSuggest\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+
+  assert.match(silkInitializer, /if \(resumeViewerSilk\)/);
+  assert.match(silkInitializer, /resumeViewerSilk = \(\) =>/);
+  assert.match(nameSuggestions, /contacts\.find\(\(contact\) => searchMatches\(q, \[contact\]\)\)/);
+  assert.match(nameSuggestions, /box\.classList\.add\("hidden"\)/);
+});

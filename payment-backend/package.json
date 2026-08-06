@@ -9,6 +9,8 @@
     "smoke": "node test/smoke.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
+    ,"create-admin": "node scripts/create-admin.mjs",
+    "initialize:test-workspace": "node scripts/initialize-test-workspace.mjs"
   },
   "devDependencies": {
     "wrangler": "^3.0.0"
