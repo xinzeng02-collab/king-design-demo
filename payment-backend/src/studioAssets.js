@@ -86,8 +86,9 @@ export async function createStudioAssetUploadUrl(env, actor, key) {
       apikey: env.SUPABASE_SERVICE_ROLE_KEY,
       authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
       "content-type": "application/json",
+      "x-upsert": "true",
     },
-    body: JSON.stringify({ upsert: true }),
+    body: "{}",
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.url) throw fail(`SUPABASE_SIGN_UPLOAD_${response.status}`, 502);
