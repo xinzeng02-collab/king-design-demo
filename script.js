@@ -2316,8 +2316,24 @@ async function renderCloudWork(record) {
   try { imageData = await window.KingCloud?.createPreviewUrl(record.storage_key); } catch {}
   if (existing) {
     existing.dataset.cloudStatus = record.status || "";
+    if (record.deleted_at) {
+      existing.dataset.deletedAt = record.deleted_at;
+      existing.dataset.deletedByKey = record.deleted_by || "";
+      existing.classList.add("deleted");
+    } else {
+      delete existing.dataset.deletedAt;
+      delete existing.dataset.deletedByKey;
+      existing.classList.remove("deleted");
+    }
     const title = existing.querySelector(".work-head strong");
     if (title && record.title) title.textContent = record.title;
+    const reviewValue = record.status === "ready"
+      ? "待审核 / 管理者未评审"
+      : record.status === "uploading" ? "上传中"
+        : record.status === "failed" ? "上传失败"
+          : record.status || "未知状态";
+    const reviewField = [...existing.querySelectorAll("dt")].find((item) => item.textContent.trim() === "审核状态")?.parentElement?.querySelector("dd");
+    if (reviewField) reviewField.textContent = reviewValue;
     // A Realtime INSERT arrives while the file is still uploading, so there
     // may be no preview element yet. On the later ready UPDATE, create and
     // load the preview instead of only trying to update an existing <img>.
@@ -2326,6 +2342,8 @@ async function renderCloudWork(record) {
       prepareWorkCardPreview(existing, { eager: true });
     }
     refreshWorkCards();
+    deletedWorks = [...workCards].filter((card) => card.classList.contains("deleted")).map((card) => ({ card, deletedAt: card.dataset.deletedAt || new Date().toISOString() }));
+    renderRecycleBin();
     renderDailyReviewBoard();
     renderLibraryGrid();
     return existing;
@@ -2342,8 +2360,14 @@ async function renderCloudWork(record) {
     imageData,
     title: record.title,
     project: "云端测试",
-    reviewStatus: record.status === "ready" ? "待审核 / 管理者未评审" : record.status,
+    reviewStatus: record.status === "ready"
+      ? "待审核 / 管理者未评审"
+      : record.status === "uploading" ? "上传中"
+        : record.status === "failed" ? "上传失败"
+          : record.status,
     reviewState: "pending",
+    deletedAt: record.deleted_at || "",
+    deletedByKey: record.deleted_by || "",
     createdAt: record.created_at,
   });
   card.dataset.cloudId = record.id;
@@ -2359,11 +2383,27 @@ async function renderCloudWork(record) {
 async function startCloudRealtimeSync() {
   if (!window.KingCloud || cloudRealtimeChannel) return;
   const works = await window.KingCloud.listWorks();
+  const staleUploadCutoff = Date.now() - 10 * 60 * 1000;
+  works.filter((work) => work.status === "uploading" && new Date(work.created_at).getTime() < staleUploadCutoff)
+    .forEach((work) => window.KingCloud.updateWork?.(work.id, { status: "failed" }).catch(() => {}));
+  // Once cloud mode is active, remove stale local copies of records that are
+  // already represented by the server. Otherwise one device can display its
+  // IndexedDB image while another correctly shows the cloud record only.
+  const cloudTitles = new Set(works.map((work) => `${work.owner_id}:${work.title}`));
+  document.querySelectorAll(".work-card:not([data-cloud-id])").forEach((card) => {
+    const owner = card.dataset.workOwner || "";
+    const title = card.querySelector(".work-head strong")?.textContent.trim() || "";
+    if (cloudTitles.has(`${currentAccount.cloudUserId || owner}:${title}`)
+      || works.some((work) => work.title === title)) card.remove();
+  });
+  workCards = document.querySelectorAll("[data-work-role]");
   for (const work of works) await renderCloudWork(work);
   cloudRealtimeChannel = window.KingCloud.subscribeWorks((payload) => {
     if (payload.eventType === "DELETE" && payload.old?.id) {
       document.querySelector(`[data-cloud-id="${CSS.escape(payload.old.id)}"]`)?.remove();
       refreshWorkCards();
+      deletedWorks = [...workCards].filter((card) => card.classList.contains("deleted")).map((card) => ({ card, deletedAt: card.dataset.deletedAt || new Date().toISOString() }));
+      renderRecycleBin();
       renderLibraryGrid();
       return;
     }
@@ -12470,14 +12510,24 @@ libraryManageSelectAll?.addEventListener("click", () => {
   renderLibraryManageState();
 });
 
-libraryManageDelete?.addEventListener("click", () => {
-  const cards = selectedLibraryManageCards();
+libraryManageDelete?.addEventListener("click", async () => {
+  let cards = selectedLibraryManageCards();
   if (!cards.length || !window.confirm(`确认删除已选中的 ${cards.length} 件作品吗？删除后会进入回收站。`)) return;
   if (isCreatorRole()) {
     cards = cards.filter((card) => card.dataset.workOwner === currentAccount.ownerKey);
   }
   if (!cards.length || !["管理员", "设计师", "手绘师"].includes(currentAccount.role)) return;
   const deletedAt = new Date().toISOString();
+  const cloudCards = cards.filter((card) => card.dataset.cloudId && window.KingCloud?.updateWork);
+  try {
+    await Promise.all(cloudCards.map((card) => window.KingCloud.updateWork(card.dataset.cloudId, {
+      deleted_at: deletedAt,
+      deleted_by: currentAccount.cloudUserId || null,
+    })));
+  } catch (error) {
+    showToast(`云端删除失败：${error.message || "请稍后重试。"}`, "error");
+    return;
+  }
   cards.forEach((card) => {
     card.classList.add("deleted");
     card.dataset.deletedAt = deletedAt;
@@ -12743,7 +12793,7 @@ function resubmitSleepingWork(card, mode) {
   showToast(`${card.dataset.file} 已作为 V${card.dataset.submissionRound} 重新提交到评审区。`, "success");
 }
 
-function deleteWorkCard(card) {
+async function deleteWorkCard(card) {
   const file = card.dataset.file;
   const confirmed = window.confirm(`确认删除 ${file} 吗？删除后会进入回收站。`);
   if (!confirmed) {
@@ -12752,6 +12802,18 @@ function deleteWorkCard(card) {
 
   if (isCreatorRole() && card.dataset.workOwner !== currentAccount.ownerKey) return;
   if (!["管理员", "设计师", "手绘师"].includes(currentAccount.role)) return;
+
+  if (card.dataset.cloudId && window.KingCloud?.updateWork) {
+    try {
+      await window.KingCloud.updateWork(card.dataset.cloudId, {
+        deleted_at: new Date().toISOString(),
+        deleted_by: currentAccount.cloudUserId || null,
+      });
+    } catch (error) {
+      showToast(`云端删除失败：${error.message || "请稍后重试。"}`, "error");
+      return;
+    }
+  }
 
   ensureArchivePreviewPersisted(card);
   card.classList.add("deleted");
@@ -12774,9 +12836,17 @@ function deleteWorkCard(card) {
   showToast(`${file} 已移入回收站，可在回收站中恢复。`, "warning");
 }
 
-function restoreWorkCard(card) {
+async function restoreWorkCard(card) {
   const file = card.dataset.file;
   if (currentAccount.role !== "管理员") return;
+  if (card.dataset.cloudId && window.KingCloud?.updateWork) {
+    try {
+      await window.KingCloud.updateWork(card.dataset.cloudId, { deleted_at: null, deleted_by: null });
+    } catch (error) {
+      showToast(`云端恢复失败：${error.message || "请稍后重试。"}`, "error");
+      return;
+    }
+  }
   card.classList.remove("deleted");
   delete card.dataset.deletedAt;
   markWorkRecordDirty(card);

@@ -29,6 +29,13 @@
     return data;
   }
 
+  async function updateWork(id, patch) {
+    const { data, error } = await client.from("works")
+      .update(patch).eq("id", id).select().single();
+    if (error) throw error;
+    return data;
+  }
+
   async function uploadWork({ title, file, onCreated }) {
     const { data: sessionData } = await client.auth.getSession();
     const user = sessionData.session?.user;
@@ -65,5 +72,5 @@
       .subscribe();
   }
 
-  window.KingCloud = { client, login, listWorks, uploadWork, createPreviewUrl, subscribeWorks };
+  window.KingCloud = { client, login, listWorks, updateWork, uploadWork, createPreviewUrl, subscribeWorks };
 })();
