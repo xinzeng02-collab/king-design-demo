@@ -23,32 +23,22 @@
     return { user: data.user, profile };
   }
 
-  async function signup(email, password, displayName) {
-    const { data, error } = await client.auth.signUp({
-      email,
-      password,
-      options: { data: { display_name: displayName } },
-    });
-    if (error) throw error;
-    if (!data.user) throw new Error("注册未返回用户信息");
-    // The database trigger creates the profile. Sign in once explicitly so
-    // the caller always receives the same shape as a normal login.
-    return login(email, password);
-  }
-
   async function listWorks() {
     const { data, error } = await client.from("works").select("*").order("created_at", { ascending: false });
     if (error) throw error;
     return data;
   }
 
-  async function uploadWork({ title, file }) {
+  async function uploadWork({ title, file, onCreated }) {
     const { data: sessionData } = await client.auth.getSession();
     const user = sessionData.session?.user;
     if (!user) throw new Error("请先登录云端账号");
     const { data: work, error: createError } = await client.from("works")
       .insert({ owner_id: user.id, title, status: "uploading" }).select().single();
     if (createError) throw createError;
+    // Let the UI and other clients show the task immediately. The binary
+    // upload continues after this database event.
+    try { await onCreated?.(work); } catch (previewError) { console.warn("cloud upload placeholder render failed", previewError); }
     const safeName = String(file.name || "artwork").replace(/[^a-zA-Z0-9._-]/g, "_");
     const storageKey = `${user.id}/${work.id}/${safeName}`;
     const { error: uploadError } = await client.storage.from("artworks").upload(storageKey, file, { upsert: false });
@@ -75,5 +65,5 @@
       .subscribe();
   }
 
-  window.KingCloud = { client, login, signup, listWorks, uploadWork, createPreviewUrl, subscribeWorks };
+  window.KingCloud = { client, login, listWorks, uploadWork, createPreviewUrl, subscribeWorks };
 })();

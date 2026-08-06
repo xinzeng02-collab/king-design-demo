@@ -17957,9 +17957,10 @@ body #viewerLibrary.is-comparing .vlib-compare-cart-empty { margin: 20px 0 4px; 
                   <input id="employeeRememberPassword" type="checkbox" />
                   <span>记住登录状态</span>
                 </label>
-                <div class="login-account-actions" aria-label="账号帮助">
-                  <button class="login-text-action" id="openAccountApplication" type="button">注册测试账号</button>
-                  <button class="login-text-action" id="openPasswordRecovery" type="button" hidden>忘记密码</button>
+                <div class="login-account-actions" aria-label="账号帮助" hidden>
+                  <button class="login-text-action" id="openAccountApplication" type="button">申请账号</button>
+                  <span aria-hidden="true"></span>
+                  <button class="login-text-action" id="openPasswordRecovery" type="button">忘记密码</button>
                 </div>
               </div>
               <button class="login-submit" type="submit" data-login-submit="employee">
@@ -18022,17 +18023,17 @@ body #viewerLibrary.is-comparing .vlib-compare-cart-empty { margin: 20px 0 4px; 
     <div class="auth-modal" id="accountApplicationModal" aria-hidden="true">
       <div class="auth-dialog">
         <header class="modal-head">
-          <div><p class="eyebrow">CLOUD DEMO</p><h2>注册测试账号</h2></div>
-          <button class="modal-close" id="closeAccountApplication" type="button" aria-label="关闭注册">×</button>
+          <div><p class="eyebrow">NEW EMPLOYEE</p><h2>申请员工账号</h2></div>
+          <button class="modal-close" id="closeAccountApplication" type="button" aria-label="关闭申请账号">×</button>
         </header>
         <form class="auth-form" id="accountApplicationForm">
           <div class="auth-form-columns">
             <label><span>姓名</span><input id="applicationName" required placeholder="请输入真实姓名" /></label>
-            <label><span>邮箱</span><input id="applicationContact" type="email" required placeholder="用于登录和找回密码" /></label>
+            <label><span>手机号或企业邮箱</span><input id="applicationContact" required placeholder="用于找回密码" /></label>
           </div>
           <div class="auth-form-columns">
-            <label><span>显示账号</span><input id="applicationUsername" required autocomplete="username" placeholder="请创建显示账号" /></label>
-            <label><span>岗位</span><select id="applicationRole" required><option value="设计师">设计师（公开测试注册默认）</option></select></label>
+            <label><span>登录账号</span><input id="applicationUsername" required autocomplete="username" placeholder="请创建登录账号" /></label>
+            <label><span>岗位</span><select id="applicationRole" required><option value="">请选择岗位</option><option>管理员</option><option>设计师</option><option>手绘师</option><option>销售</option></select></label>
           </div>
           <div class="auth-form-columns">
             <label><span>设置密码</span><input id="applicationPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="至少 8 位" /></label>
@@ -19321,32 +19322,22 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     return { user: data.user, profile };
   }
 
-  async function signup(email, password, displayName) {
-    const { data, error } = await client.auth.signUp({
-      email,
-      password,
-      options: { data: { display_name: displayName } },
-    });
-    if (error) throw error;
-    if (!data.user) throw new Error("注册未返回用户信息");
-    // The database trigger creates the profile. Sign in once explicitly so
-    // the caller always receives the same shape as a normal login.
-    return login(email, password);
-  }
-
   async function listWorks() {
     const { data, error } = await client.from("works").select("*").order("created_at", { ascending: false });
     if (error) throw error;
     return data;
   }
 
-  async function uploadWork({ title, file }) {
+  async function uploadWork({ title, file, onCreated }) {
     const { data: sessionData } = await client.auth.getSession();
     const user = sessionData.session?.user;
     if (!user) throw new Error("请先登录云端账号");
     const { data: work, error: createError } = await client.from("works")
       .insert({ owner_id: user.id, title, status: "uploading" }).select().single();
     if (createError) throw createError;
+    // Let the UI and other clients show the task immediately. The binary
+    // upload continues after this database event.
+    try { await onCreated?.(work); } catch (previewError) { console.warn("cloud upload placeholder render failed", previewError); }
     const safeName = String(file.name || "artwork").replace(/[^a-zA-Z0-9._-]/g, "_");
     const storageKey = `${user.id}/${work.id}/${safeName}`;
     const { error: uploadError } = await client.storage.from("artworks").upload(storageKey, file, { upsert: false });
@@ -19373,7 +19364,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       .subscribe();
   }
 
-  window.KingCloud = { client, login, signup, listWorks, uploadWork, createPreviewUrl, subscribeWorks };
+  window.KingCloud = { client, login, listWorks, uploadWork, createPreviewUrl, subscribeWorks };
 })();
 
 </script>
@@ -33154,7 +33145,7 @@ passwordRecoveryModal.addEventListener("click", (event) => {
   if (event.target === passwordRecoveryModal) setAuthModal(passwordRecoveryModal, false);
 });
 
-accountApplicationForm.addEventListener("submit", async (event) => {
+accountApplicationForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const username = applicationUsername.value.trim().toLowerCase();
   const contact = applicationContact.value.trim().toLowerCase();
@@ -33176,45 +33167,6 @@ accountApplicationForm.addEventListener("submit", async (event) => {
   }
   if (password.length < 8 || password !== applicationPasswordConfirm.value) {
     applicationError.textContent = password.length < 8 ? "密码至少需要 8 位。" : "两次输入的密码不一致。";
-    return;
-  }
-
-  if (window.KingCloud) {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) {
-      applicationError.textContent = "请输入可用的邮箱地址。";
-      return;
-    }
-    const submit = accountApplicationForm.querySelector('button[type="submit"]');
-    if (submit) submit.disabled = true;
-    applicationError.textContent = "";
-    try {
-      const cloud = await window.KingCloud.signup(contact, password, applicationName.value.trim() || username);
-      const account = {
-        email: contact,
-        contact,
-        role: CLOUD_ROLE_LABELS[cloud.profile.role] || "设计师",
-        name: cloud.profile.display_name || applicationName.value.trim() || username,
-        ownerKey: username,
-        cloudUserId: cloud.user.id,
-      };
-      const registeredAccounts = readRegisteredAccounts();
-      registeredAccounts[username] = account;
-      writeRegisteredAccounts(registeredAccounts);
-      demoAccounts[username] = account;
-      syncRegisteredAccountsToTeam();
-      syncProjectMemberOptions();
-      accountApplicationForm.reset();
-      setAuthModal(accountApplicationModal, false);
-      applyLogin(username, account);
-      showToast("测试账号已注册并进入工作台。", "success");
-    } catch (error) {
-      const message = String(error?.message || "");
-      applicationError.textContent = /already registered|already been registered/i.test(message)
-        ? "该邮箱已注册，请直接登录。"
-        : `注册失败${message ? `：${message}` : "，请稍后重试。"}`;
-    } finally {
-      if (submit) submit.disabled = false;
-    }
     return;
   }
 
@@ -35760,7 +35712,11 @@ uploadConfirm.addEventListener("click", async () => {
     }
     const mainFile = files.find((file, index) => uploadPurpose(file, selectedUploadFiles.indexOf(file)) === "主图") || files[0];
     const cloudWork = window.KingCloud
-      ? await window.KingCloud.uploadWork({ title: workName, file: mainFile })
+      ? await window.KingCloud.uploadWork({
+        title: workName,
+        file: mainFile,
+        onCreated: (uploadingWork) => renderCloudWork(uploadingWork),
+      })
       : null;
     // Cloud mode already owns the original file and its preview. Do not also
     // generate several legacy IndexedDB derivatives on the phone; that extra
