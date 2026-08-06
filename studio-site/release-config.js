@@ -1,5 +1,7 @@
 window.KING_RELEASE_CONFIG = Object.freeze({
-  deployment: "intranet",
+  // Vercel has no Socket.IO intranet channel; use the authenticated API polling path
+  // so changes made on another device are pulled back into the current page.
+  deployment: "vercel",
   useBackendAuth: true,
   // Vercel 同源部署：业务 API 使用当前域名的 /api 路径。
   apiBaseUrl: "",
