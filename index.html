@@ -22087,10 +22087,43 @@ let cloudRealtimeChannel = null;
 let cloudSnapshotPromise = null;
 const CLOUD_ROLE_LABELS = { admin: "管理员", designer: "设计师", painter: "手绘师", sales: "销售" };
 
+function cloudReviewPresentation(record) {
+  if (record.sleeping) return { state: "sleeping", label: "休眠 / 管理者已移入休眠区" };
+  if (record.status === "approved") return { state: "approved", label: "已通过" };
+  if (record.status === "revision") return { state: "revision", label: "需修改 / 管理者已填写修改意见" };
+  if (record.status === "uploading") return { state: "pending", label: "上传中" };
+  if (record.status === "failed") return { state: "pending", label: "上传失败" };
+  return { state: "pending", label: "待审核 / 管理者未评审" };
+}
+
+function cloudReviewPatch(card) {
+  const state = card.dataset.reviewState || "pending";
+  const resubmittedAt = Date.parse(card.dataset.resubmittedAt || "");
+  return {
+    status: state === "approved" ? "approved" : state === "revision" ? "revision" : "pending_review",
+    review_action: card.dataset.reviewAction || null,
+    review_note: card.dataset.reviewNote || null,
+    review_logs: reviewLogs(card),
+    sleeping: isSleepingWork(card),
+    submission_round: Math.max(1, Number(card.dataset.submissionRound || 1)),
+    resubmitted_at: Number.isFinite(resubmittedAt) ? new Date(resubmittedAt).toISOString() : null,
+  };
+}
+
+function syncCloudReviewState(card) {
+  if (!card?.dataset.cloudId || !window.KingCloud?.updateWork) return Promise.resolve();
+  return window.KingCloud.updateWork(card.dataset.cloudId, cloudReviewPatch(card)).catch((error) => {
+    showToast(`评审状态云端同步失败：${error.message || "请稍后重试。"}`, "error");
+    reconcileCloudWorks().catch(() => {});
+    throw error;
+  });
+}
+
 async function renderCloudWork(record) {
   if (!record?.id) return;
   const cloudRole = CLOUD_ROLE_LABELS[record.owner_profile?.role] || "设计师";
   const cloudOwnerName = record.owner_profile?.display_name || record.owner_id;
+  const review = cloudReviewPresentation(record);
   if (record.owner_id && !teamMembers.some((member) => member.ownerKey === record.owner_id)) {
     teamMembers.push({
       ownerKey: record.owner_id,
@@ -22105,6 +22138,14 @@ async function renderCloudWork(record) {
   if (existing) {
     existing.dataset.workRole = cloudRole;
     existing.dataset.workOwner = record.owner_id;
+    existing.dataset.reviewState = review.state;
+    existing.dataset.reviewAction = record.review_action || "";
+    existing.dataset.reviewNote = record.review_note || "";
+    existing.dataset.reviewLogs = JSON.stringify(record.review_logs || []);
+    existing.dataset.sleeping = record.sleeping ? "true" : "";
+    existing.dataset.submissionRound = String(record.submission_round || 1);
+    existing.dataset.resubmittedAt = record.resubmitted_at || "";
+    existing.classList.toggle("sleeping", Boolean(record.sleeping));
   }
   let imageData = "";
   try { imageData = await window.KingCloud?.createPreviewUrl(record.storage_key); } catch {}
@@ -22122,13 +22163,7 @@ async function renderCloudWork(record) {
     }
     const title = existing.querySelector(".work-head strong");
     if (title && record.title) title.textContent = record.title;
-    const reviewValue = record.status === "ready"
-      ? "待审核 / 管理者未评审"
-      : record.status === "uploading" ? "上传中"
-        : record.status === "failed" ? "上传失败"
-          : record.status || "未知状态";
-    const reviewField = [...existing.querySelectorAll("dt")].find((item) => item.textContent.trim() === "审核状态")?.parentElement?.querySelector("dd");
-    if (reviewField) reviewField.textContent = reviewValue;
+    updateCardReviewStatus(existing, review.label);
     // A Realtime INSERT arrives while the file is still uploading, so there
     // may be no preview element yet. On the later ready UPDATE, create and
     // load the preview instead of only trying to update an existing <img>.
@@ -22155,12 +22190,14 @@ async function renderCloudWork(record) {
     imageData,
     title: record.title,
     project: "云端测试",
-    reviewStatus: record.status === "ready"
-      ? "待审核 / 管理者未评审"
-      : record.status === "uploading" ? "上传中"
-        : record.status === "failed" ? "上传失败"
-          : record.status,
-    reviewState: "pending",
+    reviewStatus: review.label,
+    reviewState: review.state,
+    reviewAction: record.review_action || "",
+    reviewNote: record.review_note || "",
+    reviewLogs: JSON.stringify(record.review_logs || []),
+    sleeping: Boolean(record.sleeping),
+    submissionRound: record.submission_round || 1,
+    resubmittedAt: record.resubmitted_at || "",
     deletedAt: record.deleted_at || "",
     deletedByKey: record.deleted_by || "",
     createdAt: record.created_at,
@@ -29656,6 +29693,7 @@ function reviewItems() {
     (card) =>
       !card.classList.contains("deleted") &&
       !isSleepingWork(card) &&
+      !["uploading", "failed"].includes(card.dataset.cloudStatus) &&
       ["设计师", "手绘师"].includes(card.dataset.workRole)
   );
 }
@@ -32290,6 +32328,7 @@ function setWorkSleeping(card, sleeping, { silent = false } = {}) {
     renderDailyReviewBoard();
     sortWorkCards();
     saveStudioState();
+    syncCloudReviewState(card).catch(() => {});
     showToast(sleeping ? `${card.dataset.file} 已移入休眠区。` : `${card.dataset.file} 已取消休眠并恢复到原状态。`, "success");
   }
 }
@@ -32366,6 +32405,7 @@ libraryManageSleep?.addEventListener("click", () => {
   const cards = selectedLibraryManageCards();
   if (!cards.length || !window.confirm(`确认将已选中的 ${cards.length} 件作品移入休眠区吗？`)) return;
   cards.forEach(setWorkSleepingForBatch);
+  Promise.all(cards.map((card) => syncCloudReviewState(card))).catch(() => {});
   libraryManageSelection.clear();
   saveStudioState();
   renderSleepList();
@@ -32609,6 +32649,7 @@ function resubmitSleepingWork(card, mode) {
   renderNotifications();
   sortWorkCards();
   saveStudioState();
+  syncCloudReviewState(card).catch(() => {});
   showToast(`${card.dataset.file} 已作为 V${card.dataset.submissionRound} 重新提交到评审区。`, "success");
 }
 
@@ -33088,6 +33129,7 @@ function applyReviewDecision(sourceCard, action, note = "") {
   renderDashboardOverview(currentAccount.role);
   renderNotifications();
   saveStudioState();
+  syncCloudReviewState(sourceCard).catch(() => {});
 }
 
 function advanceLightboxAfterReview(reviewedCard) {
@@ -33127,6 +33169,7 @@ function resetReviewDecision(sourceCard) {
   renderDashboardOverview(currentAccount.role);
   renderNotifications();
   saveStudioState();
+  syncCloudReviewState(sourceCard).catch(() => {});
   showToast("稿件已移回待评审。", "success");
 }
 
@@ -33741,6 +33784,7 @@ saveReviewNote.addEventListener("click", () => {
   }
   renderDailyReviewBoard();
   saveStudioState();
+  syncCloudReviewState(card).catch(() => {});
   showToast(`已保存 ${card?.dataset.file || "稿件"} 的修改意见。`, "warning");
 });
 document.addEventListener(
