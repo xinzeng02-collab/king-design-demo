@@ -2486,7 +2486,7 @@ async function backendStudioAsset(key, options = {}) {
 
 async function provisionBackendEmployeeAccount({ username, password, role, name }) {
   if (!RELEASE_CONFIG.useBackendAuth) return null;
-  return backendApi("/api/admin/employee-account", {
+  return backendApi("/api/admin/studio-state?action=provision-employee", {
     method: "POST",
     body: JSON.stringify({ username, password: password || "", role, name }),
   });
