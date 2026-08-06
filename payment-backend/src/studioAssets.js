@@ -49,7 +49,7 @@ function supabaseStorageBucket(env) {
       });
     },
     async get(key) {
-      const response = await fetch(`${base}/${encodeURI(key)}`, { headers: headers() });
+      const response = await fetch(`${base.replace("/object/studio-assets", "/object/authenticated/studio-assets")}/${encodeURI(key)}`, { headers: headers() });
       if (response.status === 404) return null;
       if (!response.ok) throw fail(`SUPABASE_STORAGE_${response.status}`, 502);
       return { body: response.body, httpMetadata: { contentType: response.headers.get("content-type") || "application/octet-stream" } };
