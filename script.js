@@ -2316,6 +2316,7 @@ async function renderCloudWork(record) {
   try { imageData = await window.KingCloud?.createPreviewUrl(record.storage_key); } catch {}
   if (existing) {
     existing.dataset.cloudStatus = record.status || "";
+    existing.dataset.cloudStorageKey = record.storage_key || "";
     if (record.deleted_at) {
       existing.dataset.deletedAt = record.deleted_at;
       existing.dataset.deletedByKey = record.deleted_by || "";
@@ -2372,6 +2373,7 @@ async function renderCloudWork(record) {
   });
   card.dataset.cloudId = record.id;
   card.dataset.cloudStatus = record.status || "";
+  card.dataset.cloudStorageKey = record.storage_key || "";
   if (imageData) prepareWorkCardPreview(card, { eager: true });
   refreshWorkCards();
   sortWorkCards();
@@ -16547,7 +16549,7 @@ document.addEventListener("click", (event) => {
 recycleSearch.addEventListener("input", renderRecycleBin);
 recycleStatus.addEventListener("change", renderRecycleBin);
 recycleSort.addEventListener("change", renderRecycleBin);
-  recycleList?.addEventListener("click", (event) => {
+  recycleList?.addEventListener("click", async (event) => {
   const deleteButton = event.target.closest(".recycle-delete-work");
   if (deleteButton) {
     event.preventDefault();
@@ -16567,6 +16569,14 @@ recycleSort.addEventListener("change", renderRecycleBin);
     if (currentAccount.role !== "管理员") return;
     const entry = deletedWorks.find((item) => item.card.dataset.file === file);
     if (!entry || !window.confirm(`永久删除 ${file} 吗？此操作不可恢复。`)) return;
+    if (entry.card.dataset.cloudId && window.KingCloud?.deleteWork) {
+      try {
+        await window.KingCloud.deleteWork(entry.card.dataset.cloudId, entry.card.dataset.cloudStorageKey || "");
+      } catch (error) {
+        showToast(`云端永久删除失败：${error.message || "请稍后重试。"}`, "error");
+        return;
+      }
+    }
     permanentlyRemoveWorkCards([entry.card]);
     deletedWorks = deletedWorks.filter((item) => item !== entry);
     saveStudioStateNow();

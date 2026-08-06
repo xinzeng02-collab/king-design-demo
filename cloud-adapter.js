@@ -36,6 +36,15 @@
     return data;
   }
 
+  async function deleteWork(id, storageKey) {
+    const { error } = await client.from("works").delete().eq("id", id);
+    if (error) throw error;
+    if (storageKey) {
+      const { error: storageError } = await client.storage.from("artworks").remove([storageKey]);
+      if (storageError) throw storageError;
+    }
+  }
+
   async function uploadWork({ title, file, onCreated }) {
     const { data: sessionData } = await client.auth.getSession();
     const user = sessionData.session?.user;
@@ -82,5 +91,5 @@
       .subscribe();
   }
 
-  window.KingCloud = { client, login, listWorks, updateWork, uploadWork, createPreviewUrl, subscribeWorks };
+  window.KingCloud = { client, login, listWorks, updateWork, deleteWork, uploadWork, createPreviewUrl, subscribeWorks };
 })();
