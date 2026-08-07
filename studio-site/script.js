@@ -2510,7 +2510,6 @@ async function uploadBackendStudioAsset(key, imageData, { onProgress } = {}) {
     const request = new XMLHttpRequest();
     request.open("PUT", signedUrl);
     request.timeout = 180000;
-    request.setRequestHeader("content-type", imageData?.type || "application/octet-stream");
     request.setRequestHeader("x-upsert", "true");
     request.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
@@ -2520,10 +2519,19 @@ async function uploadBackendStudioAsset(key, imageData, { onProgress } = {}) {
     };
     request.onload = () => request.status >= 200 && request.status < 300
       ? resolve()
-      : reject(Object.assign(new Error("STUDIO_ASSET_UPLOAD_FAILED"), { code: "STUDIO_ASSET_UPLOAD_FAILED", status: request.status }));
+      : reject(Object.assign(new Error("STUDIO_ASSET_UPLOAD_FAILED"), {
+        code: "STUDIO_ASSET_UPLOAD_FAILED",
+        status: request.status,
+        detail: request.responseText || "",
+      }));
     request.onerror = () => reject(Object.assign(new Error("STUDIO_ASSET_UPLOAD_FAILED"), { code: "STUDIO_ASSET_UPLOAD_FAILED" }));
     request.ontimeout = () => reject(Object.assign(new Error("STUDIO_ASSET_UPLOAD_TIMEOUT"), { code: "STUDIO_ASSET_UPLOAD_TIMEOUT" }));
-    request.send(imageData);
+    // Supabase signed uploads accept Blob/File payloads as multipart form data.
+    // Let the browser add the boundary; setting content-type manually returns 400.
+    const body = new FormData();
+    body.append("cacheControl", "3600");
+    body.append("", imageData);
+    request.send(body);
   });
 }
 
@@ -8962,6 +8970,40 @@ function orderPatternList(order) {
   return (order.files || []).map((f) => f?.name || f).filter(Boolean);
 }
 
+function ordersContainingWork(file) {
+  const target = String(file || "").trim();
+  if (!target) return [];
+  return studioOrders.filter((order) => orderPatternList(order).some((pattern) => String(pattern) === target));
+}
+
+function undeliveredOrdersForWork(file) {
+  return ordersContainingWork(file).filter((order) =>
+    orderProgressStatus(order) !== "已关闭" && orderDeliverStatus(order) !== "已交付"
+  );
+}
+
+function workDeleteBlock(cards) {
+  const blocked = [];
+  (cards || []).forEach((card) => {
+    const file = card?.dataset?.file || "";
+    const orders = undeliveredOrdersForWork(file);
+    if (orders.length) blocked.push({ file, orders });
+  });
+  return blocked;
+}
+
+function ensureWorksCanMoveToRecycle(cards) {
+  const blocked = workDeleteBlock(cards);
+  if (!blocked.length) return true;
+  const orderIds = [...new Set(blocked.flatMap((item) => item.orders.map((order) => order.id)))];
+  const files = blocked.map((item) => item.file).filter(Boolean);
+  showToast(
+    `${files.length === 1 ? `稿件 ${files[0]}` : `${files.length} 件所选稿件`}仍关联未交付订单 ${orderIds.join("、")}，订单交付后才可删除。`,
+    "warning",
+  );
+  return false;
+}
+
 function moneyToCents(value) {
   if (value == null || String(value).trim() === "") return null;
   const amount = Number(value);
@@ -9282,17 +9324,24 @@ function removeOrderPattern(orderId, file) {
     showToast("订单至少需要保留一款作品；如需移除，请删除整张订单。", "warning");
     return;
   }
-  if (!window.confirm(`确认从订单 ${order.id} 中删除作品「${file}」？`)) return;
-  const prices = ensureOrderPatternPrices(order);
-  order.patternIds = patterns.filter((pattern) => pattern !== file);
-  order.files = (order.files || []).filter((entry) => String(entry?.name || entry) !== file);
-  delete prices[file];
-  order.price = sumMoney(order.patternIds.map((pattern) => prices[pattern]));
-  logOrderEvent(order, `删除订单作品 ${file}，订单总额调整为 ¥${order.price.toLocaleString("zh-CN")}`, currentAccount.role || "员工");
-  saveStudioState();
-  syncSoldWorkBadges();
-  renderOrderCenter();
-  showToast(`${file} 已从订单移除，总额已更新。`, "success");
+  openExitConfirmation({
+    title: "警告：从订单移除稿件",
+    message: `确认从订单 ${order.id} 中移除「${file}」？此操作只会解除该稿件与当前订单的关系并重新计算金额，不会删除作品库原稿。`,
+    submitText: "确认移出订单",
+    cancelText: "保留稿件",
+    onConfirm: () => {
+      const prices = ensureOrderPatternPrices(order);
+      order.patternIds = patterns.filter((pattern) => pattern !== file);
+      order.files = (order.files || []).filter((entry) => String(entry?.name || entry) !== file);
+      delete prices[file];
+      order.price = sumMoney(order.patternIds.map((pattern) => prices[pattern]));
+      logOrderEvent(order, `从订单移除作品 ${file}，订单总额调整为 ¥${order.price.toLocaleString("zh-CN")}`, currentAccount.role || "员工");
+      saveStudioState();
+      syncSoldWorkBadges();
+      renderOrderCenter();
+      showToast(`${file} 已从订单移除，总额已更新；作品库原稿仍保留。`, "success");
+    },
+  });
 }
 
 function advanceOrderMilestone(orderId) {
@@ -13095,11 +13144,12 @@ libraryManageSelectAll?.addEventListener("click", () => {
 
 libraryManageDelete?.addEventListener("click", async () => {
   let cards = selectedLibraryManageCards();
-  if (!cards.length || !window.confirm(`确认删除已选中的 ${cards.length} 件作品吗？删除后会进入回收站。`)) return;
   if (isCreatorRole()) {
     cards = cards.filter((card) => card.dataset.workOwner === currentAccount.ownerKey);
   }
   if (!cards.length || !["管理员", "设计师", "手绘师"].includes(currentAccount.role)) return;
+  if (!ensureWorksCanMoveToRecycle(cards)) return;
+  if (!window.confirm(`确认删除已选中的 ${cards.length} 件作品吗？删除后会进入回收站。`)) return;
   if (isCreatorRole()) {
     cards.forEach((card) => setPersonalArchiveState(card, "delete", true));
     libraryManageSelection.clear();
@@ -13403,13 +13453,11 @@ async function resubmitSleepingWork(card, mode) {
 
 async function deleteWorkCard(card) {
   const file = card.dataset.file;
-  const confirmed = window.confirm(`确认删除 ${file} 吗？删除后会进入回收站。`);
-  if (!confirmed) {
-    return;
-  }
-
   if (isCreatorRole() && card.dataset.workOwner !== currentAccount.ownerKey) return;
   if (!["管理员", "设计师", "手绘师"].includes(currentAccount.role)) return;
+  if (!ensureWorksCanMoveToRecycle([card])) return;
+  const confirmed = window.confirm(`确认删除 ${file} 吗？删除后会进入回收站。`);
+  if (!confirmed) return;
 
   ensureArchivePreviewPersisted(card);
   if (isCreatorRole()) {
@@ -13523,9 +13571,14 @@ function workStorageKeys(card) {
 }
 
 function permanentlyRemoveWorkCards(cards) {
-  const requestedFiles = new Set((cards || []).map((card) => card?.dataset?.file).filter(Boolean));
+  const protectedFiles = [...new Set((cards || [])
+    .map((card) => card?.dataset?.file)
+    .filter((file) => file && ordersContainingWork(file).length))];
+  const requestedFiles = new Set((cards || [])
+    .map((card) => card?.dataset?.file)
+    .filter((file) => file && !protectedFiles.includes(file)));
   const list = [...new Set([
-    ...(cards || []).filter(Boolean),
+    ...(cards || []).filter((card) => requestedFiles.has(card?.dataset?.file)),
     ...[...workCards].filter((card) => requestedFiles.has(card.dataset.file)),
   ])];
   const files = [...requestedFiles];
@@ -13544,6 +13597,7 @@ function permanentlyRemoveWorkCards(cards) {
     const failed = results.filter((result) => result.status === "rejected");
     if (failed.length) throw Object.assign(new Error("STUDIO_ASSET_DELETE_FAILED"), { failures: failed.length });
   });
+  files.protectedFiles = protectedFiles;
   return files;
 }
 
@@ -15701,20 +15755,29 @@ employeeAccountForm?.addEventListener("submit", async (event) => {
     });
     const provisionedAccounts = [];
     setEmployeeAccountSubmitting(true);
+    showAppLoading(`正在创建 ${results.length} 个员工账号`, { progress: true });
+    setAppLoadingProgress(5, `正在准备 · 0/${results.length}`);
+    await waitForUiPaint();
     try {
       if (RELEASE_CONFIG.useBackendAuth) {
-        for (const item of results) {
+        for (let index = 0; index < results.length; index += 1) {
+          const item = results[index];
+          setAppLoadingProgress(10 + Math.round((index / results.length) * 55), `正在创建 ${item.name} 的云端登录账号 · ${index}/${results.length}`);
           const provisioned = await provisionBackendEmployeeAccount(item);
           if (provisioned?.created) provisionedAccounts.push(item.username);
+          setAppLoadingProgress(10 + Math.round(((index + 1) / results.length) * 55), `${item.name} 的登录账号已创建 · ${index + 1}/${results.length}`);
         }
       }
+      setAppLoadingProgress(76, "正在写入员工资料…");
       results.forEach((item) => {
         const member = { name: item.name, role: item.role, ownerKey: item.username, tone: "blue", baseLoadScore: 0, accountStatus: "正常", joinedAt: item.joinedAt };
         teamMembers.push(member);
         persistEmployeeAccount(member, { password: item.password, createdAt: item.joinedAt });
       });
       syncProjectMemberOptions();
+      setAppLoadingProgress(88, "正在同步员工资料到云端…");
       await saveStudioStateToCloud();
+      setAppLoadingProgress(100, `${results.length} 个员工账号已创建`);
     } catch (error) {
       const failedKeys = new Set(results.map((item) => item.username));
       for (let index = teamMembers.length - 1; index >= 0; index -= 1) {
@@ -15731,6 +15794,7 @@ employeeAccountForm?.addEventListener("submit", async (event) => {
       return;
     } finally {
       setEmployeeAccountSubmitting(false);
+      hideAppLoading();
     }
     renderTeamView();
     showEmployeeCredentialResults(results.map(({ joinedAt: _joinedAt, ...item }) => item));
@@ -15784,10 +15848,15 @@ employeeAccountForm?.addEventListener("submit", async (event) => {
   if (password) accountPatch.password = password;
   let provisioned = null;
   setEmployeeAccountSubmitting(true);
+  showAppLoading(wasEditing ? "正在保存员工账号" : "正在创建员工账号", { progress: true });
+  setAppLoadingProgress(8, "正在校验账号资料…");
+  await waitForUiPaint();
   try {
     if (RELEASE_CONFIG.useBackendAuth) {
+      setAppLoadingProgress(28, wasEditing ? "正在更新云端登录账号…" : "正在创建云端登录账号…");
       provisioned = await provisionBackendEmployeeAccount({ username, password, role, name, allowExisting: wasEditing });
     }
+    setAppLoadingProgress(64, "正在写入员工资料…");
     if (!member) {
       member = { name, role, ownerKey: username, tone: "blue", baseLoadScore: 0, accountStatus: "正常", joinedAt: joinedAtValue };
       teamMembers.push(member);
@@ -15799,7 +15868,9 @@ employeeAccountForm?.addEventListener("submit", async (event) => {
     }
     persistEmployeeAccount(member, accountPatch);
     syncProjectMemberOptions();
+    setAppLoadingProgress(86, "正在同步员工资料到云端…");
     await saveStudioStateToCloud();
+    setAppLoadingProgress(100, wasEditing ? "员工账号已更新" : "员工账号已创建");
   } catch (error) {
     if (member && !originalMember) teamMembers.splice(teamMembers.indexOf(member), 1);
     if (member && originalMember) Object.assign(member, originalMember);
@@ -15817,6 +15888,7 @@ employeeAccountForm?.addEventListener("submit", async (event) => {
     return;
   } finally {
     setEmployeeAccountSubmitting(false);
+    hideAppLoading();
   }
   renderTeamView();
   if (wasEditing) {
@@ -17320,9 +17392,14 @@ recycleList?.addEventListener("click", async (event) => {
     }
     if (currentAccount.role !== "管理员") return;
     const entry = deletedWorks.find((item) => item.card.dataset.file === file);
+    const linkedOrders = ordersContainingWork(file);
+    if (linkedOrders.length) {
+      showToast(`${file} 仍用于订单 ${linkedOrders.map((order) => order.id).join("、")}，为保留订单历史不能永久删除。`, "warning");
+      return;
+    }
     if (!entry || !window.confirm(`永久删除 ${file} 吗？此操作不可恢复。`)) return;
     const removedFiles = permanentlyRemoveWorkCards([entry.card]);
-    deletedWorks = deletedWorks.filter((item) => item.card.dataset.file !== file);
+    deletedWorks = deletedWorks.filter((item) => !removedFiles.includes(item.card.dataset.file));
     try {
       await saveStudioStateToCloud();
       await removedFiles.cleanupPromise;
@@ -17409,7 +17486,8 @@ document.querySelector("#sleepManageRestore")?.addEventListener("click", async (
 document.querySelector("#sleepManageDelete")?.addEventListener("click", async () => {
   if (currentAccount.role === "销售") return;
   const cards = sleepItemsForRole().filter((card) => sleepManageSelection.has(card.dataset.file));
-  if (!cards.length || !window.confirm(`确认删除已选中的 ${cards.length} 件休眠稿件吗？删除后会进入回收站。`)) return;
+  if (!cards.length || !ensureWorksCanMoveToRecycle(cards)) return;
+  if (!window.confirm(`确认删除已选中的 ${cards.length} 件休眠稿件吗？删除后会进入回收站。`)) return;
   const deletedAt = new Date().toISOString();
   if (isCreatorRole()) {
     cards.forEach((card) => setPersonalArchiveState(card, "delete", true));
@@ -17472,18 +17550,20 @@ emptyRecycle.addEventListener("click", async () => {
     return;
   }
 
-  const confirmed = window.confirm("确认一键清空回收站吗？清空后当前原型中不会再显示这些作品。");
+  const confirmed = window.confirm("确认一键清空回收站吗？未关联订单的稿件会被永久删除；订单历史中仍在使用的稿件会继续保留。");
   if (!confirmed) {
     return;
   }
 
   const removedFiles = permanentlyRemoveWorkCards(deletedWorks.map(({ card }) => card));
-  deletedWorks = [];
+  deletedWorks = deletedWorks.filter(({ card }) => !removedFiles.includes(card.dataset.file));
   try {
     await saveStudioStateToCloud();
     await removedFiles.cleanupPromise;
     renderRecycleBin();
-    showToast("回收站已清空。", "warning");
+    showToast(removedFiles.protectedFiles.length
+      ? `已清理 ${removedFiles.length} 件稿件；${removedFiles.protectedFiles.length} 件因关联订单而保留。`
+      : "回收站已清空。", "warning");
   } catch {
     renderRecycleBin();
     showToast("回收站元数据已清空，但部分云端原图仍在清理中。", "error");

@@ -258,10 +258,12 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-production-sync-v7/);
+  assert.match(html, /script\.js\?v=20260807-production-sync-v9/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
+  assert.match(script, /const body = new FormData\(\)[\s\S]*?body\.append\("cacheControl", "3600"\)[\s\S]*?body\.append\("", imageData\)[\s\S]*?request\.send\(body\)/);
+  assert.doesNotMatch(script.match(/async function uploadBackendStudioAsset[\s\S]*?\n\}/)?.[0] || "", /setRequestHeader\("content-type"/);
   assert.match(script, /function mergeStudioModule\(module, remoteValue, localValue, previousValue\)/);
   assert.match(script, /valueToSend = mergeStudioModule\(module, backendSyncMeta\(\)\?\.state\?\.\[module\], valueToSend, previousState\?\.\[module\]\)/);
   assert.match(script, /const removedKeys = new Set/);
@@ -944,8 +946,25 @@ test("员工账号弹窗保护编辑过程，并提供详情与密码复制", as
   assert.match(script, /employeeAccountUsername\.readOnly = Boolean\(member\)/);
   assert.doesNotMatch(script, /employeeAccountModal\?\.addEventListener\("click"/);
   assert.match(script, /provisioned = await provisionBackendEmployeeAccount[\s\S]*?teamMembers\.push\(member\)/);
+  assert.match(script, /showAppLoading\(wasEditing \? "正在保存员工账号" : "正在创建员工账号", \{ progress: true \}\)/);
+  assert.match(script, /setAppLoadingProgress\(86, "正在同步员工资料到云端…"\)/);
+  assert.match(script, /showAppLoading\(`正在创建 \$\{results\.length\} 个员工账号`, \{ progress: true \}\)/);
   assert.match(styles, /\.team-member-cell \.team-avatar\s*\{\s*flex:\s*0 0 30px/);
   assert.match(styles, /\.team-member-detail-modal/);
+});
+
+test("稿件删除遵循订单交付状态并保留订单历史", async () => {
+  const script = await read("script.js");
+
+  assert.match(script, /function ordersContainingWork\(file\)/);
+  assert.match(script, /function undeliveredOrdersForWork\(file\)[\s\S]*?orderDeliverStatus\(order\) !== "已交付"/);
+  assert.match(script, /function ensureWorksCanMoveToRecycle\(cards\)/);
+  assert.match(script, /async function deleteWorkCard\(card\)[\s\S]*?ensureWorksCanMoveToRecycle\(\[card\]\)/);
+  assert.match(script, /libraryManageDelete\?\.addEventListener[\s\S]*?ensureWorksCanMoveToRecycle\(cards\)/);
+  assert.match(script, /#sleepManageDelete[\s\S]*?ensureWorksCanMoveToRecycle\(cards\)/);
+  assert.match(script, /function permanentlyRemoveWorkCards\(cards\)[\s\S]*?ordersContainingWork\(file\)\.length/);
+  assert.match(script, /title: "警告：从订单移除稿件"/);
+  assert.match(script, /此操作只会解除该稿件与当前订单的关系并重新计算金额，不会删除作品库原稿/);
 });
 
 test("管理员待评审稿件在侧栏标题旁显示状态红点", async () => {
