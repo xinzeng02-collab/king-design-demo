@@ -2320,6 +2320,7 @@ let backendLastSyncAttempt = Promise.resolve();
 let salesLibraryRefreshPromise = null;
 let nasSyncWriteQueue = Promise.resolve();
 let backendSyncPollTimer = null;
+let backendDeferredRefreshTimer = 0;
 let nasSyncPollTimer = null;
 let backendRealtimeSocket = null;
 let backendRealtimeReconnectTimer = null;
@@ -2707,9 +2708,13 @@ async function pullBackendStudioState({ refreshUi = false, checkRevision = false
   let localState = {};
   try { localState = JSON.parse(localJson || "{}"); } catch {}
   const changedModules = changedStudioModules(localState, remoteState);
+  if (refreshUi && remoteJson !== localJson && anyOverlayOpen()) {
+    scheduleDeferredBackendRefresh();
+    return false;
+  }
   writeBackendSyncMeta({ revision: Number(record.revision || 0), state: remoteState });
   window.__kingLastBackendRevision = Number(record.revision || 0);
-  if (remoteJson === localJson || (refreshUi && anyOverlayOpen())) return false;
+  if (remoteJson === localJson) return false;
   if (showProgress) setAppLoadingProgress(72, "正在合并云端数据…");
   if (refreshUi) applyCloudStudioState(remoteState, remoteJson, changedModules);
   else {
@@ -2718,6 +2723,21 @@ async function pullBackendStudioState({ refreshUi = false, checkRevision = false
   }
   if (showProgress) setAppLoadingProgress(88, "云端数据已同步，正在打开工作台…");
   return true;
+}
+
+function scheduleDeferredBackendRefresh() {
+  if (backendDeferredRefreshTimer) return;
+  backendDeferredRefreshTimer = window.setTimeout(() => {
+    backendDeferredRefreshTimer = 0;
+    if (!RELEASE_CONFIG.useBackendAuth || !backendAuthSession()?.accessToken) return;
+    if (anyOverlayOpen()) {
+      scheduleDeferredBackendRefresh();
+      return;
+    }
+    backendSyncQueue
+      .then(() => pullBackendStudioState({ refreshUi: true, checkRevision: true }))
+      .catch(() => {});
+  }, 400);
 }
 
 function backendWritableModules(role) {
@@ -2736,6 +2756,22 @@ function studioRecordIdentity(record) {
   if (record == null) return "";
   if (typeof record !== "object") return `${typeof record}:${String(record)}`;
   return record?.id || record?.file || record?.ownerKey || "";
+}
+
+function mergeStudioRecordFields(remoteRecord, localRecord, previousRecord) {
+  if (!remoteRecord || !previousRecord) return localRecord;
+  const merged = { ...remoteRecord };
+  const keys = new Set([...Object.keys(previousRecord), ...Object.keys(localRecord || {})]);
+  keys.forEach((key) => {
+    const localHasKey = Object.prototype.hasOwnProperty.call(localRecord || {}, key);
+    const previousHasKey = Object.prototype.hasOwnProperty.call(previousRecord, key);
+    const locallyChanged = localHasKey !== previousHasKey
+      || JSON.stringify(localRecord?.[key]) !== JSON.stringify(previousRecord?.[key]);
+    if (!locallyChanged) return;
+    if (localHasKey) merged[key] = localRecord[key];
+    else delete merged[key];
+  });
+  return merged;
 }
 
 function mergeStudioModule(module, remoteValue, localValue, previousValue) {
@@ -2757,9 +2793,26 @@ function mergeStudioModule(module, remoteValue, localValue, previousValue) {
       if (!key) return;
       const previousRecord = previousRecords.get(key);
       const locallyChanged = !previousRecord || JSON.stringify(previousRecord) !== JSON.stringify(record);
-      if (locallyChanged || !merged.has(key)) merged.set(key, record);
+      if (locallyChanged || !merged.has(key)) {
+        const remoteRecord = merged.get(key);
+        merged.set(key, module === "createdWorks" && remoteRecord && previousRecord
+          ? mergeStudioRecordFields(remoteRecord, record, previousRecord)
+          : record);
+      }
     });
     return [...merged.values()];
+  }
+  if (module === "overrides" && remoteValue && localValue && typeof remoteValue === "object" && typeof localValue === "object") {
+    const merged = { ...remoteValue };
+    Object.keys(previousValue || {}).forEach((key) => {
+      if (!Object.prototype.hasOwnProperty.call(localValue, key)) delete merged[key];
+    });
+    Object.entries(localValue).forEach(([key, record]) => {
+      merged[key] = remoteValue[key] && previousValue?.[key]
+        ? mergeStudioRecordFields(remoteValue[key], record, previousValue[key])
+        : record;
+    });
+    return merged;
   }
   if (module === "personalWorkArchives" && remoteValue && localValue && typeof remoteValue === "object" && typeof localValue === "object") {
     return {
@@ -2838,7 +2891,13 @@ function queueBackendStudioSync(previousState, nextState) {
 
 async function saveStudioStateToCloud() {
   if (!saveStudioState()) throw Object.assign(new Error("STUDIO_STATE_SAVE_FAILED"), { code: "STUDIO_STATE_SAVE_FAILED" });
-  if (RELEASE_CONFIG.useBackendAuth) await backendLastSyncAttempt;
+  if (!RELEASE_CONFIG.useBackendAuth) return;
+  try {
+    await backendLastSyncAttempt;
+  } catch (error) {
+    queueBackendStudioSync(backendSyncMeta()?.state || {}, studioState);
+    await backendLastSyncAttempt;
+  }
 }
 
 async function cleanupDuplicateCloudStudioRecords() {
@@ -14078,14 +14137,31 @@ function openReviewConfirmation(card, action, onConfirm) {
   if (needsNote) reviewConfirmNote.focus();
 }
 
-function applyReviewDecision(sourceCard, action, note = "") {
+async function syncReviewChangeToCloud(successMessage) {
+  showAppLoading("正在同步审核结果…", { progress: true });
+  setAppLoadingProgress(24, "正在保存审核状态和修改意见…");
+  try {
+    await saveStudioStateToCloud();
+    setAppLoadingProgress(100, "审核结果已同步到云端");
+    showToast(successMessage, "success");
+    return true;
+  } catch (error) {
+    showToast("审核结果已保存在当前页面，但云端同步失败，请保持页面并重试。", "error");
+    return false;
+  } finally {
+    hideAppLoading();
+  }
+}
+
+async function applyReviewDecision(sourceCard, action, note = "") {
+  let successMessage = "审核结果已同步。";
   setReviewLog(sourceCard, action, note || `审核状态更改为${action}`);
   if (action === "通过") {
     sourceCard.classList.remove("sleeping");
     sourceCard.dataset.sleeping = "";
     sourceCard.dataset.reviewState = "approved";
     updateCardReviewStatus(sourceCard, "已通过");
-    showToast("已通过，作品已进入作品库。", "success");
+    successMessage = "已通过并同步，作品已进入作品库。";
   } else if (action === "修改") {
     sourceCard.classList.remove("sleeping");
     sourceCard.dataset.sleeping = "";
@@ -14093,7 +14169,7 @@ function applyReviewDecision(sourceCard, action, note = "") {
     updateCardReviewStatus(sourceCard, "需修改 / 管理者已填写修改意见");
     // 新的打回必须重新提醒对应上传者，即使旧提醒曾被手动关闭。
     dismissedNotifications.delete("work-revision");
-    showToast(`作品未通过，已通知${sourceCard.dataset.workRole === "手绘师" ? "手绘师" : "设计师"}修改。`, "warning");
+    successMessage = `修改要求已同步给${sourceCard.dataset.workRole === "手绘师" ? "手绘师" : "设计师"}。`;
   }
   markWorkRecordDirty(sourceCard);
   renderSleepList();
@@ -14103,7 +14179,7 @@ function applyReviewDecision(sourceCard, action, note = "") {
   renderLibraryGrid();
   renderDashboardOverview(currentAccount.role);
   renderNotifications();
-  saveStudioState();
+  return syncReviewChangeToCloud(successMessage);
 }
 
 function advanceLightboxAfterReview(reviewedCard) {
@@ -14165,7 +14241,7 @@ reviewConfirmCancel.addEventListener("click", closeReviewConfirmation);
 reviewConfirmModal.addEventListener("click", (event) => {
   if (event.target === reviewConfirmModal) closeReviewConfirmation();
 });
-reviewConfirmSubmit.addEventListener("click", () => {
+reviewConfirmSubmit.addEventListener("click", async () => {
   if (!pendingReviewConfirmation) return;
   const { action, onConfirm } = pendingReviewConfirmation;
   const note = reviewConfirmNote.value.trim();
@@ -14174,8 +14250,13 @@ reviewConfirmSubmit.addEventListener("click", () => {
     showToast("请先填写修改要求与原因。", "warning");
     return;
   }
-  onConfirm(action, note);
-  closeReviewConfirmation();
+  reviewConfirmSubmit.disabled = true;
+  try {
+    const synced = await onConfirm(action, note);
+    if (synced !== false) closeReviewConfirmation();
+  } finally {
+    reviewConfirmSubmit.disabled = false;
+  }
 });
 exitConfirmClose?.addEventListener("click", closeExitConfirmation);
 exitConfirmCancel?.addEventListener("click", closeExitConfirmation);
@@ -14705,9 +14786,10 @@ lightboxReviewActions.addEventListener("click", (event) => {
     lightboxRevisionInput.focus();
     return;
   }
-  const commit = (confirmedAction, note = "") => {
-    applyReviewDecision(card, confirmedAction, note);
-    advanceLightboxAfterReview(card);
+  const commit = async (confirmedAction, note = "") => {
+    const synced = await applyReviewDecision(card, confirmedAction, note);
+    if (synced) advanceLightboxAfterReview(card);
+    return synced;
   };
   if (isReviewPending(card)) {
     commit(action);
@@ -14715,7 +14797,7 @@ lightboxReviewActions.addEventListener("click", (event) => {
     openReviewConfirmation(card, action, commit);
   }
 });
-lightboxRevisionConfirm?.addEventListener("click", () => {
+lightboxRevisionConfirm?.addEventListener("click", async () => {
   let card = lightboxRevisionDraftCard;
   if (!card && isAdminReviewContext()) {
     card = activeLightboxCards()[activePreviewIndex];
@@ -14737,7 +14819,10 @@ lightboxRevisionConfirm?.addEventListener("click", () => {
     showToast("请先填写修改要求和原因。", "warning");
     return;
   }
-  applyReviewDecision(card, "修改", note);
+  lightboxRevisionConfirm.disabled = true;
+  const synced = await applyReviewDecision(card, "修改", note);
+  lightboxRevisionConfirm.disabled = false;
+  if (!synced) return;
   lightboxRevisionDraftCard = null;
   lightboxRevisionInput.value = "";
   advanceLightboxAfterReview(card);
@@ -14750,7 +14835,7 @@ lightboxResetReview?.addEventListener("click", () => {
     renderLightbox();
   });
 });
-saveReviewNote.addEventListener("click", () => {
+saveReviewNote.addEventListener("click", async () => {
   const card = activeLightboxCards()[activePreviewIndex];
   const note = reviewNoteText.value.trim();
   if (!note) {
@@ -14764,8 +14849,7 @@ saveReviewNote.addEventListener("click", () => {
     updateCardReviewStatus(card, "需修改 / 管理者已填写修改意见");
   }
   renderDailyReviewBoard();
-  saveStudioState();
-  showToast(`已保存 ${card?.dataset.file || "稿件"} 的修改意见。`, "warning");
+  await syncReviewChangeToCloud(`已同步 ${card?.dataset.file || "稿件"} 的修改意见。`);
 });
 document.addEventListener(
   "pointerdown",

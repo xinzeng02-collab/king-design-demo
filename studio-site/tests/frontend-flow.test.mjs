@@ -326,7 +326,7 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-production-sync-v14/);
+  assert.match(html, /script\.js\?v=20260807-production-sync-v15/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
@@ -364,6 +364,28 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const merged = mergeModule("createdWorks", remote, local, previous);
   assert.equal(merged.find((item) => item.file === "A")?.reviewState, "approved");
   assert.equal(merged.find((item) => item.file === "B")?.reviewState, "pending");
+
+  const previousWork = [{ file: "C", imageKey: "old", reviewState: "pending", reviewNote: "" }];
+  const localWork = [{ file: "C", imageKey: "new", reviewState: "pending", reviewNote: "" }];
+  const remoteWork = [{ file: "C", imageKey: "old", reviewState: "revision", reviewNote: "调整配色" }];
+  const mergedWork = mergeModule("createdWorks", remoteWork, localWork, previousWork)[0];
+  assert.equal(mergedWork.imageKey, "new");
+  assert.equal(mergedWork.reviewState, "revision");
+  assert.equal(mergedWork.reviewNote, "调整配色");
+
+  const mergedOverride = mergeModule(
+    "overrides",
+    { C: remoteWork[0] },
+    { C: localWork[0] },
+    { C: previousWork[0] },
+  ).C;
+  assert.equal(mergedOverride.imageKey, "new");
+  assert.equal(mergedOverride.reviewState, "revision");
+  assert.equal(mergedOverride.reviewNote, "调整配色");
+
+  const pull = script.match(/async function pullBackendStudioState\([\s\S]*?\n\}/)?.[0] || "";
+  assert.ok(pull.indexOf("refreshUi && remoteJson !== localJson && anyOverlayOpen()") < pull.indexOf("writeBackendSyncMeta"));
+  assert.match(script, /function scheduleDeferredBackendRefresh\(\)[\s\S]*?pullBackendStudioState\(\{ refreshUi: true, checkRevision: true \}\)/);
 });
 
 test("正式版不泄漏演示设计师身份，成员档案只对管理员开放", async () => {
@@ -488,6 +510,9 @@ test("每日评审区分管理员审核与上传者编辑视角", async () => {
   assert.match(script, /保存并重新提交/);
   assert.match(script, /lightboxRevisionDraftCard = card/);
   assert.match(script, /applyReviewDecision\(card, "修改", note\)/);
+  assert.match(script, /async function applyReviewDecision/);
+  assert.match(script, /async function syncReviewChangeToCloud[\s\S]*?await saveStudioStateToCloud\(\)/);
+  assert.match(script, /reviewConfirmSubmit\.addEventListener\("click", async[\s\S]*?await onConfirm\(action, note\)/);
   assert.match(script, /action === "修改" && !note/);
   assert.match(script, /currentReviewAction === "修改"[\s\S]*?action === "通过"/);
   assert.match(script, /badge\.textContent = `配色 \$\{colorCount\}`/);
