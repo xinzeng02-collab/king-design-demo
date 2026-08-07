@@ -13,10 +13,28 @@ function requireStaff(actor) {
   if (!actor.organizationId || !STAFF_ROLES.has(actor.role)) throw fail("FORBIDDEN_STAFF_ONLY", 403);
 }
 
+function supabaseSafeKey(value, maxLength = 230) {
+  const original = String(value || "asset").trim() || "asset";
+  if (/^[\x20-\x7e]+$/.test(original) && original.length <= maxLength) return original;
+  const clean = original
+    .normalize("NFKD")
+    .replace(/[^\x00-\x7f]/g, "-")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "") || "asset";
+  let hash = 2166136261;
+  for (let index = 0; index < original.length; index += 1) {
+    hash ^= original.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const suffix = (hash >>> 0).toString(36).padStart(7, "0");
+  return `${clean.slice(0, Math.max(1, maxLength - suffix.length - 1))}-${suffix}`;
+}
+
 function assetKey(actor, key) {
   const clean = String(key || "").trim();
   if (!clean || clean.length > 240 || clean.includes("..") || /[\\/]/.test(clean)) throw fail("INVALID_ASSET_KEY");
-  return `studio/${actor.organizationId}/${clean}`;
+  return `studio/${actor.organizationId}/${supabaseSafeKey(clean)}`;
 }
 
 function bucket(env) {

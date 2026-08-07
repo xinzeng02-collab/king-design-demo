@@ -4179,7 +4179,8 @@ function artworkUploadErrorMessage(error) {
   if (/TIMEOUT/.test(code)) return `${fileName}上传超时。系统已自动重试 3 次，请保持网络稳定后再次上传。`;
   if (status === 401 || /UNAUTHENTICATED/.test(code)) return "登录状态已过期，请重新登录后继续上传。";
   if (status === 403 || /FORBIDDEN/.test(code)) return "当前账号没有上传该文件的权限，请联系管理员检查员工岗位。";
-  if (status === 400 || /INVALID_ASSET_KEY/.test(code)) return `${fileName}的文件名或格式无法上传，请缩短文件名后重试。`;
+  if (/InvalidKey|INVALID_ASSET_KEY/i.test(code)) return "云端存储路径生成失败，系统未修改原图；请刷新页面后重试。";
+  if (status === 400) return `${fileName}被云端拒绝上传（${code || "请求格式错误"}），系统未修改原图。`;
   if (/STUDIO_STATE|BACKEND_REQUEST|revision/i.test(code)) return "图片已上传，但稿件资料同步失败；请保持页面并重试，系统不会压缩原图。";
   if (/NAS_|EACCES|EPERM|ENOENT|network|access|quota|存储|写入|UPLOAD|STORAGE/i.test(code)) {
     return RELEASE_CONFIG.useBackendAuth
@@ -4225,13 +4226,18 @@ async function createImageVariantBlob(file, maxSize, square = false, quality = 0
 }
 
 function normalizeStudioAssetBaseKey(value, maxLength = 210) {
-  const clean = String(value || "asset")
-    .replace(/[\\/\u0000-\u001f\u007f]/g, "-")
-    .trim() || "asset";
-  if (clean.length <= maxLength) return clean;
+  const original = String(value || "asset").trim() || "asset";
+  const clean = original
+    .normalize("NFKD")
+    .replace(/[^\x00-\x7f]/g, "-")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "") || "asset";
+  const needsHash = clean !== original || clean.length > maxLength;
+  if (!needsHash) return clean;
   let hash = 2166136261;
-  for (let index = 0; index < clean.length; index += 1) {
-    hash ^= clean.charCodeAt(index);
+  for (let index = 0; index < original.length; index += 1) {
+    hash ^= original.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
   const suffix = (hash >>> 0).toString(36).padStart(7, "0");

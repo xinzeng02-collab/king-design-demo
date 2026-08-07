@@ -37,20 +37,23 @@ test("工作室文件拒绝非员工、非法键和超限内容", async () => {
   await assert.rejects(assets.putStudioAsset(env, actor, "too_large", request), /ASSET_TOO_LARGE/);
 });
 
-test("签名上传地址会编码中文和空格文件名", async () => {
+test("签名上传会把中文逻辑键映射为 Supabase 可接受的 ASCII 对象键", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    url: "/object/upload/sign/studio-assets/studio/org-a/手绘稿 0807__original?token=signed-token",
-  }), { status: 200 });
+  let signedObjectKey = "";
+  globalThis.fetch = async (url) => {
+    signedObjectKey = decodeURIComponent(String(url).split("/studio-assets/")[1] || "");
+    return new Response(JSON.stringify({
+      url: `/object/upload/sign/studio-assets/${signedObjectKey}?token=signed-token`,
+    }), { status: 200 });
+  };
   try {
     const result = await assets.createStudioAssetUploadUrl({
       SUPABASE_URL: "https://example.supabase.co",
       SUPABASE_SERVICE_ROLE_KEY: "service-key",
     }, actor, "手绘稿 0807__original");
-    assert.equal(
-      result.signedUrl,
-      "https://example.supabase.co/storage/v1/object/upload/sign/studio-assets/studio/org-a/%E6%89%8B%E7%BB%98%E7%A8%BF%200807__original?token=signed-token",
-    );
+    assert.match(signedObjectKey, /^studio\/org-a\/[A-Za-z0-9._-]+$/);
+    assert.doesNotMatch(signedObjectKey, /手绘稿/);
+    assert.match(result.signedUrl, /\/studio\/org-a\/[A-Za-z0-9._-]+\?token=signed-token$/);
   } finally {
     globalThis.fetch = originalFetch;
   }

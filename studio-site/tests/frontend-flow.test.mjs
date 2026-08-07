@@ -284,7 +284,7 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-production-sync-v12/);
+  assert.match(html, /script\.js\?v=20260807-production-sync-v13/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
@@ -298,6 +298,13 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   assert.match(script, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/);
   assert.match(script, /request\.timeout = 600000/);
   assert.match(script, /function normalizeStudioAssetBaseKey/);
+  const keyNormalizerSource = script.match(/function normalizeStudioAssetBaseKey\([^)]*\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const normalizeAssetKey = new Function(`${keyNormalizerSource}; return normalizeStudioAssetBaseKey;`)();
+  const chineseKey = normalizeAssetKey("K-XH0708_看图王");
+  assert.match(chineseKey, /^[A-Za-z0-9._-]+$/);
+  assert.doesNotMatch(chineseKey, /看图王/);
+  assert.notEqual(chineseKey, normalizeAssetKey("K-XH0708_另一张图"));
+  assert.equal(normalizeAssetKey("K-XH0708_original"), "K-XH0708_original");
   assert.match(script, /backendLastSyncAttempt = backendSyncQueue\.then\(syncWithRetry\)/);
   assert.match(script, /await saveStudioStateToCloud\(\)/);
   assert.match(script, /logoutButton\.addEventListener\("click", async[\s\S]*?await backendLastSyncAttempt/);
