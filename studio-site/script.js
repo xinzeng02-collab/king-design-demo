@@ -1419,22 +1419,50 @@ function pjBindDetail(p) {
   }));
   body.querySelector("#pjDownloadAll")?.addEventListener("click", (event) => pjDownloadProjectArchive(p, event.currentTarget));
   body.querySelector("#pjFileInput")?.addEventListener("change", async (e) => {
-    const fs = [...(e.target.files || [])]; if (!fs.length) return;
-    p.files = p.files || [];
-    for (const f of fs) {
-      const key = `pjfile_${p.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      try { await saveImageToDB(key, f); } catch {}
-      p.files.push({
-        name: f.name,
-        size: f.size,
-        type: f.type || "application/octet-stream",
-        key,
-        uploadedBy: currentAccount.name || currentAccount.role,
-        uploadedAt: formatDateTime(),
-      });
+    const input = e.currentTarget;
+    const files = acceptedUploadFiles(input?.files, {
+      label: "项目文件",
+      maxBytes: MAX_RESOURCE_FILE_BYTES,
+    });
+    if (!files.length) {
+      if (input) input.value = "";
+      return;
     }
-    pjPush(p, `上传了 ${fs.length} 个项目资料`); pjSave(); pjRenderDetail(p);
-    showToast("资料已上传到项目。", "success");
+    const startedAt = Date.now();
+    try {
+      await runPreviewFileUpload({
+        label: "项目文件",
+        files,
+        upload: async (file, index, onProgress) => {
+          const key = normalizeStudioAssetBaseKey(`pjfile_${p.id}_${startedAt}_${index + 1}`, 230);
+          await saveImageToDB(key, file, { onProgress });
+          return key;
+        },
+        finalize: async (uploaded) => {
+          p.files ||= [];
+          uploaded.forEach(({ file, value: key }) => {
+            p.files.push({
+              name: file.name,
+              size: file.size,
+              type: file.type || "application/octet-stream",
+              key,
+              uploadedBy: currentAccount.name || currentAccount.role,
+              uploadedAt: formatDateTime(),
+            });
+          });
+          pjPush(p, `上传了 ${uploaded.length} 个项目资料`);
+          pjSave();
+          await saveStudioStateToCloud();
+          pjRenderDetail(p);
+        },
+      });
+      showToast(`已上传 ${files.length} 个项目文件并同步到云端。`, "success");
+    } catch (error) {
+      console.error(error);
+      showToast(artworkUploadErrorMessage(error), "error");
+    } finally {
+      if (input) input.value = "";
+    }
   });
   body.querySelector("[data-pj-publish]")?.addEventListener("click", () => pjPublish(p));
   document.querySelector("#pjdHeadActions [data-pj-complete]")?.addEventListener("click", () => {
@@ -1875,28 +1903,46 @@ function pjOpenForm(edit, draft = null, options = {}) {
       renderPickedFiles();
     }));
     host.querySelector("#pjfFileInput")?.addEventListener("change", async (event) => {
-      const files = [...(event.target.files || [])];
-      if (!files.length) return;
-      const addTile = host.querySelector(".pjf-file-add");
-      addTile?.classList.add("loading");
-      for (const file of files) {
-        const key = `pjfile_${formFileNamespace}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        try {
-          await saveImageToDB(key, file);
-          pickedFiles.push({
-            name: file.name,
-            size: file.size,
-            type: file.type || "application/octet-stream",
-            key,
-            uploadedBy: currentAccount.name || currentAccount.role,
-            uploadedAt: formatDateTime(),
-          });
-        } catch (error) {
-          console.error(error);
-          showToast(`文件「${file.name}」上传失败。`, "error");
-        }
+      const input = event.currentTarget;
+      const files = acceptedUploadFiles(input?.files, {
+        label: "项目文件",
+        maxBytes: MAX_RESOURCE_FILE_BYTES,
+      });
+      if (!files.length) {
+        if (input) input.value = "";
+        return;
       }
-      renderPickedFiles();
+      const startedAt = Date.now();
+      try {
+        await runPreviewFileUpload({
+          label: "项目文件",
+          files,
+          upload: async (file, index, onProgress) => {
+            const key = normalizeStudioAssetBaseKey(`pjfile_${formFileNamespace}_${startedAt}_${index + 1}`, 230);
+            await saveImageToDB(key, file, { onProgress });
+            return key;
+          },
+          finalize: async (uploaded) => {
+            uploaded.forEach(({ file, value: key }) => {
+              pickedFiles.push({
+                name: file.name,
+                size: file.size,
+                type: file.type || "application/octet-stream",
+                key,
+                uploadedBy: currentAccount.name || currentAccount.role,
+                uploadedAt: formatDateTime(),
+              });
+            });
+            renderPickedFiles();
+          },
+        });
+        showToast(`已上传 ${files.length} 个项目文件。`, "success");
+      } catch (error) {
+        console.error(error);
+        showToast(artworkUploadErrorMessage(error), "error");
+      } finally {
+        if (input) input.value = "";
+      }
     });
   };
   renderPickedPeople();
@@ -4228,6 +4274,37 @@ function createUploadProgressTracker(plans) {
   };
 }
 
+async function runPreviewFileUpload({ label, files, upload, finalize }) {
+  const plans = [...files].map((file) => ({ file }));
+  if (!plans.length) return [];
+  const progress = createUploadProgressTracker(plans);
+  showAppLoading(`正在上传${label}`, { progress: true });
+  setAppLoadingProgress(2, `准备上传 · 0/${plans.length}`);
+  await waitForUiPaint();
+  try {
+    const largestBytes = Math.max(...plans.map((plan) => Number(plan.file?.size || 0)), 0);
+    const concurrency = largestBytes >= 30 * 1024 * 1024 ? 1 : largestBytes >= 10 * 1024 * 1024 ? 2 : 3;
+    const uploaded = await mapWithConcurrency(plans, concurrency, async (plan, index) => {
+      const fileName = uploadDisplayName(plan.file);
+      const onProgress = (loaded, total) => progress.update(index, total > 0 ? loaded / total : 0, fileName);
+      try {
+        const value = await upload(plan.file, index, onProgress);
+        progress.complete(index, fileName);
+        return { file: plan.file, value };
+      } catch (error) {
+        if (error && typeof error === "object") error.uploadFileName ||= fileName;
+        throw error;
+      }
+    });
+    setAppLoadingProgress(94, "文件已上传，正在同步稿件资料到云端…");
+    await finalize(uploaded);
+    setAppLoadingProgress(100, `${label}已上传并同步到云端`);
+    return uploaded;
+  } finally {
+    hideAppLoading();
+  }
+}
+
 function artworkUploadErrorMessage(error) {
   const status = Number(error?.status || 0);
   const code = String(error?.code || error?.message || "");
@@ -4246,7 +4323,7 @@ function artworkUploadErrorMessage(error) {
       ? `${fileName}云端上传失败，系统已自动重试 3 次；请检查网络后重试。`
       : "NAS 文件写入失败，请检查连接与 files 文件夹权限。";
   }
-  return `图片处理失败${code ? `：${code}` : "，请重新选择图片再试。"}`;
+  return `${fileName}上传失败${code ? `：${code}` : "，请重新选择文件再试。"}`;
 }
 
 async function createImageVariantBlob(file, maxSize, square = false, quality = 0.84) {
@@ -5757,9 +5834,7 @@ function renderAdminDashboard() {
 let designerDashboardRange = "month";
 
 function creativeOwnCards(role = currentAccount.role) {
-  return activeWorkCards().filter((card) =>
-    card.dataset.workRole === role && card.dataset.workOwner === currentAccount.ownerKey
-  );
+  return [...workCards].filter((card) => personalWorkCardVisible(card, role, currentAccount.ownerKey));
 }
 
 function designerCardDate(card) {
@@ -6988,12 +7063,9 @@ function configureWorksView(role, ownerKey, mode = activeWorksMode) {
   worksBoard?.classList.toggle("sales-readonly-library", role === "销售");
 
   const nextScope = new Set([...workCards].filter((card) => {
+    if (isPersonalWorks) return personalWorkCardVisible(card, role, ownerKey);
     if (card.classList.contains("deleted") || isSleepingWork(card)) return false;
-    if (isPersonalWorks && isCreatorRole(role)) {
-      if (isPersonallyDeleted(card, ownerKey) || isPersonallySleeping(card, ownerKey)) return false;
-    }
-    if (isSharedLibrary && !isApprovedSharedWork(card)) return false;
-    return !isPersonalWorks || personalWorkCardMatches(card, role, ownerKey);
+    return !isSharedLibrary || isApprovedSharedWork(card);
   }));
 
   // 管理员在“作品库 / 我的稿件”之间切换时，只更新当前挂载的卡片和
@@ -7018,6 +7090,13 @@ function personalWorkCardMatches(card, role, ownerKey) {
   if (card.dataset.workOwner !== ownerKey) return false;
   if (role === "设计师") return card.dataset.workRole === "设计师";
   if (role === "手绘师") return card.dataset.workRole === "手绘师";
+  return true;
+}
+
+function personalWorkCardVisible(card, role, ownerKey) {
+  if (!personalWorkCardMatches(card, role, ownerKey)) return false;
+  if (card.classList.contains("deleted") || isSleepingWork(card)) return false;
+  if (isCreatorRole(role) && (isPersonallyDeleted(card, ownerKey) || isPersonallySleeping(card, ownerKey))) return false;
   return true;
 }
 
@@ -10489,16 +10568,24 @@ async function appendReferenceFiles(card, files) {
   });
   if (!card || !imageFiles.length) return;
   const keys = getReferenceKeys(card);
-  for (let index = 0; index < imageFiles.length; index += 1) {
-    const key = normalizeStudioAssetBaseKey(`${card.dataset.file}__reference_${keys.length + index + 1}_${Date.now()}`, 230);
-    await saveImageToDB(key, imageFiles[index]);
-    keys.push(key);
-  }
-  card.dataset.referenceKeys = JSON.stringify(keys);
-  updateCardReferenceMaterial(card, `参考图 ${keys.length} 张`);
-  markWorkRecordDirty(card);
-  saveStudioState();
-  renderReferenceMaterials(card);
+  const startedAt = Date.now();
+  await runPreviewFileUpload({
+    label: "参考图",
+    files: imageFiles,
+    upload: async (file, index, onProgress) => {
+      const key = normalizeStudioAssetBaseKey(`${card.dataset.file}__reference_${keys.length + index + 1}_${startedAt}`, 230);
+      await saveImageToDB(key, file, { onProgress });
+      return key;
+    },
+    finalize: async (uploaded) => {
+      keys.push(...uploaded.map((item) => item.value));
+      card.dataset.referenceKeys = JSON.stringify(keys);
+      updateCardReferenceMaterial(card, `参考图 ${keys.length} 张`);
+      markWorkRecordDirty(card);
+      await saveStudioStateToCloud();
+      renderReferenceMaterials(card);
+    },
+  });
   showToast(`已为 ${card.dataset.file} 添加 ${imageFiles.length} 张参考图。`, "success");
 }
 
@@ -10909,10 +10996,23 @@ function openSketchPicker(card) {
     .filter(Boolean);
   openPainterPickerModal({
     selection,
-    onConfirm: (items) => {
-      setLinkedSketches(card, items.map((item) => item.file));
-      renderSketchOptions(card);
-      showToast(`已关联 ${items.length} 幅手绘稿。`, "success");
+    onConfirm: async (items) => {
+      showAppLoading("正在同步手绘素材关联", { progress: true });
+      setAppLoadingProgress(20, "正在整理手绘稿关联…");
+      await waitForUiPaint();
+      try {
+        setLinkedSketches(card, items.map((item) => item.file));
+        setAppLoadingProgress(70, "正在同步稿件资料到云端…");
+        await saveStudioStateToCloud();
+        setAppLoadingProgress(100, "手绘素材关联已同步到云端");
+        renderSketchOptions(card);
+        showToast(`已关联 ${items.length} 幅手绘稿。`, "success");
+      } catch (error) {
+        console.error(error);
+        showToast("手绘素材关联未能同步到云端，请重试。", "error");
+      } finally {
+        hideAppLoading();
+      }
     },
   });
 }
@@ -11057,32 +11157,39 @@ async function appendWorkImages(card, files) {
     return;
   }
   const startedAt = Date.now();
-  const uploaded = await mapWithConcurrency(accepted, 3, async (file, index) => ({
-    file,
-    tiers: await persistArtworkImageTiers(`${card.dataset.file}__view_${existingEntries.length + index + 1}_${startedAt}`, file),
-  }));
-  uploaded.forEach(({ file, tiers }) => {
-    existingEntries.push({
-      name: file.name,
-      purpose: `补充图 ${existingEntries.length + 1}`,
-      thumbKey: tiers.thumbKey,
-      previewKey: tiers.previewKey,
-      originalKey: tiers.originalKey,
-      type: file.type || "image/jpeg",
-      primary: false,
-    });
+  await runPreviewFileUpload({
+    label: "作品图片",
+    files: accepted,
+    upload: (file, index, onProgress) => persistArtworkImageTiers(
+      `${card.dataset.file}__view_${existingEntries.length + index + 1}_${startedAt}`,
+      file,
+      { onProgress },
+    ),
+    finalize: async (uploaded) => {
+      uploaded.forEach(({ file, value: tiers }) => {
+        existingEntries.push({
+          name: file.name,
+          purpose: `补充图 ${existingEntries.length + 1}`,
+          thumbKey: tiers.thumbKey,
+          previewKey: tiers.previewKey,
+          originalKey: tiers.originalKey,
+          type: file.type || "image/jpeg",
+          primary: false,
+        });
+      });
+      card.dataset.workImages = JSON.stringify(existingEntries);
+      card.dataset.workImagesCleared = "false";
+      setReviewLog(card, "图片补充", `补充了 ${accepted.length} 张图片`, { setCurrent: false });
+      activeMediaKind = "image";
+      activeWorkImageIndex = existingEntries.length - accepted.length;
+      markWorkRecordDirty(card);
+      await saveStudioStateToCloud();
+      renderWorkImageOptions(card);
+      applyWorkImage(card, activeWorkImageIndex);
+      updateLightboxMediaMeta(card);
+      renderDailyReviewBoard();
+    },
   });
-  card.dataset.workImages = JSON.stringify(existingEntries);
-  card.dataset.workImagesCleared = "false";
-  setReviewLog(card, "图片补充", `补充了 ${accepted.length} 张图片`, { setCurrent: false });
-  activeMediaKind = "image";
-  activeWorkImageIndex = existingEntries.length - accepted.length;
-  markWorkRecordDirty(card);
-  await saveStudioStateToCloud();
-  renderWorkImageOptions(card);
-  applyWorkImage(card, activeWorkImageIndex);
-  updateLightboxMediaMeta(card);
-  renderDailyReviewBoard();
   showToast(`已直接添加 ${accepted.length} 张作品图片。`, "success");
 }
 
@@ -11146,7 +11253,7 @@ function deletePaletteVariant(card, index) {
 }
 
 async function appendPaletteFiles(card, files) {
-  const supportedFiles = acceptedUploadFiles([...files].filter(isSupportedPaletteFile), {
+  const supportedFiles = acceptedUploadFiles(files, {
     label: "配色",
     maxBytes: MAX_IMAGE_FILE_BYTES,
     extensions: SUPPORTED_IMAGE_EXTENSIONS,
@@ -11161,23 +11268,32 @@ async function appendPaletteFiles(card, files) {
   const availableSlots = Math.max(0, MAX_UPLOAD_FILES - (keys.length - 1));
   const accepted = supportedFiles.slice(0, availableSlots);
   if (supportedFiles.length > accepted.length) showToast("超过最大上传数量", "warning");
-  for (let index = 0; index < accepted.length; index += 1) {
-    const file = accepted[index];
-    const baseKey = `${card.dataset.file}__color_${keys.length + 1}_${Date.now()}_${index}`;
-    const tiers = await persistArtworkImageTiers(baseKey, file);
-    keys.push(tiers.previewKey);
-    thumbKeys.push(tiers.thumbKey);
-    entries.push({ name: file.name, key: tiers.originalKey, type: file.type || "application/octet-stream", primary: false });
-  }
-  setPaletteKeys(card, keys);
-  setPaletteThumbKeys(card, thumbKeys);
-  setPaletteFiles(card, entries);
-  card.dataset.colors = keys.length;
-  enhanceOneWorkCard(card);
-  renderPaletteOptions(card);
-  if (typeof renderSketchOptions === "function") renderSketchOptions(card);
-  renderDailyReviewBoard();
-  saveStudioState();
+  const startedAt = Date.now();
+  await runPreviewFileUpload({
+    label: "配色",
+    files: accepted,
+    upload: (file, index, onProgress) => persistArtworkImageTiers(
+      `${card.dataset.file}__color_${keys.length + index + 1}_${startedAt}`,
+      file,
+      { onProgress },
+    ),
+    finalize: async (uploaded) => {
+      uploaded.forEach(({ file, value: tiers }) => {
+        keys.push(tiers.previewKey);
+        thumbKeys.push(tiers.thumbKey);
+        entries.push({ name: file.name, key: tiers.originalKey, type: file.type || "application/octet-stream", primary: false });
+      });
+      setPaletteKeys(card, keys);
+      setPaletteThumbKeys(card, thumbKeys);
+      setPaletteFiles(card, entries);
+      card.dataset.colors = keys.length;
+      enhanceOneWorkCard(card);
+      await saveStudioStateToCloud();
+      renderPaletteOptions(card);
+      if (typeof renderSketchOptions === "function") renderSketchOptions(card);
+      renderDailyReviewBoard();
+    },
+  });
   showToast(`已增加 ${accepted.length} 个配色。`, "success");
 }
 
@@ -11461,7 +11577,7 @@ function renderLightbox() {
     const sourceFiles = getSourceFiles(card);
     if (sourceFileStatus) if (sourceFileStatus) sourceFileStatus.textContent = "";
     sourceFileDownloadList.innerHTML = `${sourceFiles.map((file, index) => `<div class="source-file-row"><button class="source-file-download-item" type="button" data-source-file-index="${index}"><span>${escapeHtml(file.name || `源文件 ${index + 1}`)}</span><b>下载</b></button>${canEditMetadata ? `<button class="source-file-remove" type="button" data-source-file-remove="${index}" aria-label="删除 ${escapeHtml(file.name || `源文件 ${index + 1}`)}" title="删除"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"></path></svg></button>` : ""}</div>`).join("")}
-      <button class="source-file-add" type="button" data-source-file-add><span>＋</span><b>${sourceFiles.length ? "继续添加" : "未上传源文件 · 点击上传"}</b></button>`;
+      ${canEditMetadata ? `<button class="source-file-add" type="button" data-source-file-add><span>＋</span><b>${sourceFiles.length ? "继续添加" : "未上传源文件 · 点击上传"}</b></button>` : ""}`;
     sourceDownloadAll?.classList.toggle("hidden", !sourceFiles.length);
   }
   if (inOrder) {
@@ -14600,7 +14716,7 @@ paletteFileInput.addEventListener("change", async () => {
     await appendPaletteFiles(paletteFileTargetCard, paletteFileInput.files);
   } catch (error) {
     console.error(error);
-    showToast("配色上传失败，请重新选择文件。", "error");
+    showToast(artworkUploadErrorMessage(error), "error");
   } finally {
     paletteFileInput.value = "";
     paletteFileTargetCard = null;
@@ -14612,7 +14728,7 @@ workImageAddInput?.addEventListener("change", async () => {
     await appendWorkImages(workImageAddTargetCard, workImageAddInput.files);
   } catch (error) {
     console.error(error);
-    showToast("作品图片添加失败，请重新选择。", "error");
+    showToast(artworkUploadErrorMessage(error), "error");
   } finally {
     workImageAddInput.value = "";
     workImageAddTargetCard = null;
@@ -16493,25 +16609,40 @@ sourceFileDownloadList?.addEventListener("click", (event) => {
 async function appendSourceFiles(card, files) {
   if (!card) return;
   const existing = getSourceFiles(card);
-  const incoming = [...files].slice(0, Math.max(0, MAX_UPLOAD_FILES - existing.length));
+  const supported = acceptedUploadFiles(files, {
+    label: "源文件",
+    maxBytes: MAX_SOURCE_FILE_BYTES,
+    extensions: [...SUPPORTED_IMAGE_EXTENSIONS, ...SUPPORTED_DOCUMENT_EXTENSIONS, "ps"],
+  });
+  const incoming = supported.slice(0, Math.max(0, MAX_UPLOAD_FILES - existing.length));
   if (!incoming.length) {
-    showToast("源文件已达到最大数量。", "warning");
+    if (supported.length) showToast("源文件已达到最大数量。", "warning");
     return;
   }
-  for (let index = 0; index < incoming.length; index += 1) {
-    const file = incoming[index];
-    const key = normalizeStudioAssetBaseKey(`${card.dataset.file}__source_${existing.length + index + 1}_${Date.now()}`, 230);
-    await saveImageToDB(key, file);
-    existing.push({ name: file.name, key, type: file.type || "application/octet-stream", size: file.size || 0 });
-  }
-  card.dataset.sourceFiles = JSON.stringify(existing);
-  const first = existing[0];
-  card.dataset.sourceFileName = first?.name || "";
-  card.dataset.sourceFileKey = first?.key || "";
-  card.dataset.sourceFileType = first?.type || "";
-  markWorkRecordDirty(card);
-  saveStudioState();
-  renderLightbox();
+  if (supported.length > incoming.length) showToast("源文件已达到最大数量，其余文件未加入。", "warning");
+  const startedAt = Date.now();
+  await runPreviewFileUpload({
+    label: "源文件",
+    files: incoming,
+    upload: async (file, index, onProgress) => {
+      const key = normalizeStudioAssetBaseKey(`${card.dataset.file}__source_${existing.length + index + 1}_${startedAt}`, 230);
+      await saveImageToDB(key, file, { onProgress });
+      return key;
+    },
+    finalize: async (uploaded) => {
+      uploaded.forEach(({ file, value: key }) => {
+        existing.push({ name: file.name, key, type: file.type || "application/octet-stream", size: file.size || 0 });
+      });
+      card.dataset.sourceFiles = JSON.stringify(existing);
+      const first = existing[0];
+      card.dataset.sourceFileName = first?.name || "";
+      card.dataset.sourceFileKey = first?.key || "";
+      card.dataset.sourceFileType = first?.type || "";
+      markWorkRecordDirty(card);
+      await saveStudioStateToCloud();
+      renderLightbox();
+    },
+  });
   showToast(`已添加 ${incoming.length} 个源文件。`, "success");
 }
 
@@ -16521,7 +16652,7 @@ sourceFileInput?.addEventListener("change", async () => {
     await appendSourceFiles(sourceFileTargetCard, sourceFileInput.files);
   } catch (error) {
     console.error(error);
-    showToast("源文件上传失败，请重新选择。", "error");
+    showToast(artworkUploadErrorMessage(error), "error");
   } finally {
     sourceFileInput.value = "";
   }
@@ -16616,7 +16747,7 @@ addReferenceInput.addEventListener("change", async () => {
     await appendReferenceFiles(addReferenceTargetCard, addReferenceInput.files);
   } catch (error) {
     console.error(error);
-    showToast("参考图添加失败，请重新选择图片。", "error");
+    showToast(artworkUploadErrorMessage(error), "error");
   } finally {
     addReferenceInput.value = "";
     addReferenceTargetCard = null;

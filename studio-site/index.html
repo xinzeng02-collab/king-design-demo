@@ -287,8 +287,8 @@
 
         <nav class="nav nav-bottom" aria-label="回收站导航">
           <button class="nav-item" data-view="resources" data-roles="管理员,设计师,手绘师,销售"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h6.5l1.7 2H20v11H4z"></path><path d="M8 12h8M8 15h5"></path></svg><span class="nav-label">资源库</span></button>
-          <button class="nav-item" data-view="sleep" data-roles="管理员,设计师"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 15.5A8 8 0 1 1 10.5 5a7 7 0 0 0 8.5 10.5z"></path></svg><span class="nav-label">稿件休眠区</span></button>
-          <button class="nav-item" data-view="recycle" data-roles="管理员,设计师"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14l-1 13H6zM8 7V4h8v3M3 7h18M9 11v5M15 11v5"></path></svg><span class="nav-label">回收站</span></button>
+          <button class="nav-item" data-view="sleep" data-roles="管理员"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 15.5A8 8 0 1 1 10.5 5a7 7 0 0 0 8.5 10.5z"></path></svg><span class="nav-label">稿件休眠区</span></button>
+          <button class="nav-item" data-view="recycle" data-roles="管理员"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14l-1 13H6zM8 7V4h8v3M3 7h18M9 11v5M15 11v5"></path></svg><span class="nav-label">回收站</span></button>
         </nav>
 
         <section class="sidebar-profile account-dock" aria-label="个人资料">
@@ -1433,7 +1433,7 @@
 
     <input type="file" id="replaceImageInput" accept=".tiff,.tif,.pcx,.psd,.psb,.ai,.eps,.jpeg,.jpg,.jepg,.png,.enc,application/octet-stream" multiple style="display:none" />
     <input type="file" id="addReferenceInput" accept=".tiff,.tif,.pcx,.psd,.psb,.ai,.eps,.jpeg,.jpg,.jepg,.png,.enc,application/octet-stream" multiple style="display:none" />
-    <input type="file" id="sourceFileInput" multiple style="display:none" />
+    <input type="file" id="sourceFileInput" accept=".tiff,.tif,.pcx,.ps,.psd,.psb,.ai,.eps,.jpeg,.jpg,.jepg,.png,.enc,.zip,.pdf,.doc,.docx,.ppt,.pptx,.rar,application/octet-stream" multiple style="display:none" />
     <input type="file" id="workImageAddInput" accept=".tiff,.tif,.pcx,.psd,.psb,.ai,.eps,.jpeg,.jpg,.jepg,.png,.enc,application/octet-stream" multiple style="display:none" />
     <input type="file" id="paletteFileInput" accept=".tiff,.tif,.pcx,.psd,.psb,.ai,.eps,.jpeg,.jpg,.jepg,.png,.enc,application/octet-stream" multiple style="display:none" />
 
@@ -1443,6 +1443,6 @@
     <script src="./performance-runtime.js?v=20260727-performance-v2"></script>
     <script src="./login-portals.js?v=20260807-login-recovery-v1"></script>
     <script src="/socket.io/socket.io.js"></script>
-  <script src="./script.js?v=20260807-production-sync-v15"></script>
+  <script src="./script.js?v=20260807-production-sync-v16"></script>
   </body>
 </html>

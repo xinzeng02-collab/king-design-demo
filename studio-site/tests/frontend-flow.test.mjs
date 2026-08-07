@@ -164,7 +164,7 @@ test("共享作品库和手绘关联只接收审核通过且未归档的稿件",
   assert.match(sharedApproval, /card\.classList\.contains\("deleted"\)/);
   assert.match(sharedApproval, /isSleepingWork\(card\)/);
   assert.match(sharedApproval, /\["已通过", "已出售", "交付中", "完结"\]/);
-  assert.match(worksView, /isSharedLibrary && !isApprovedSharedWork\(card\)/);
+  assert.match(worksView, /return !isSharedLibrary \|\| isApprovedSharedWork\(card\)/);
   assert.match(script.match(/function approvedLibraryCards\(\) \{[\s\S]*?\n\}/)?.[0] || "", /filter\(isApprovedSharedWork\)/);
 
   const isApproved = new Function("reviewLogs", "isSleepingWork", "cardStatusSummary", `${sharedApproval}; return isApprovedSharedWork;`)(
@@ -281,7 +281,7 @@ test("管理员拥有独立的个人稿件入口并复用创作者稿件模式",
   assert.match(script, /worksFilterContext !== nextFilterContext[\s\S]*?libraryFilterState\[row\.key\]\.clear\(\)[\s\S]*?renderLibraryFilterBar\(\)/);
   assert.match(script, /worksBoard\?\.classList\.toggle\("personal-review-gallery", isPersonalWorks\)/);
   assert.match(script, /function personalWorkCardMatches\(card, role, ownerKey\)/);
-  assert.match(script, /return !isPersonalWorks \|\| personalWorkCardMatches\(card, role, ownerKey\)/);
+  assert.match(script, /if \(isPersonalWorks\) return personalWorkCardVisible\(card, role, ownerKey\)/);
   assert.match(script, /const mountedCards = \[\.\.\.\(worksBoard\?\.querySelectorAll\("\.work-card"\)/);
   assert.match(script, /function deferHiddenWorkPreviewCleanup\(cards\)/);
   assert.match(script, /requestIdleCallback\(runChunk, \{ timeout: 180 \}\)/);
@@ -326,7 +326,7 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-production-sync-v15/);
+  assert.match(html, /script\.js\?v=20260807-production-sync-v16/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
@@ -427,6 +427,37 @@ test("设计师和手绘师有直达上传入口，并显示真实云端上传�
   assert.match(script, /setAppLoadingProgress\(100, "上传完成，正在打开稿件…"\)/);
   assert.match(script, /topStartReview\?\.toggleAttribute\("hidden", !canStartReview\)/);
   assert.match(script, /if \(!\["管理员", "销售"\]\.includes\(currentAccount\.role\)\) return;/);
+});
+
+test("预览窗口附件上传显示真实进度并等待云端同步", async () => {
+  const html = await read("index.html");
+  const script = await read("script.js");
+
+  assert.match(script, /async function runPreviewFileUpload\(\{ label, files, upload, finalize \}\)/);
+  assert.match(script, /showAppLoading\(`正在上传\$\{label\}`, \{ progress: true \}\)/);
+  assert.match(script, /const onProgress = \(loaded, total\) => progress\.update/);
+  assert.match(script, /setAppLoadingProgress\(94, "文件已上传，正在同步稿件资料到云端…"\)/);
+  for (const functionName of ["appendReferenceFiles", "appendWorkImages", "appendPaletteFiles", "appendSourceFiles"]) {
+    assert.match(script, new RegExp(`async function ${functionName}\\([\\s\\S]*?runPreviewFileUpload\\(\\{[\\s\\S]*?await saveStudioStateToCloud\\(\\)`));
+  }
+  assert.match(script, /async function appendSourceFiles\(card, files\)[\s\S]*?acceptedUploadFiles\(files, \{[\s\S]*?maxBytes: MAX_SOURCE_FILE_BYTES/);
+  assert.match(script, /saveImageToDB\(key, file, \{ onProgress \}\)/);
+  assert.match(script, /showToast\(artworkUploadErrorMessage\(error\), "error"\)/);
+  assert.match(script, /showAppLoading\("正在同步手绘素材关联", \{ progress: true \}\)[\s\S]*?await saveStudioStateToCloud\(\)/);
+  assert.match(html, /id="sourceFileInput"[^>]+accept="[^"]*\.psd[^"]*\.zip[^"]*\.pdf/);
+  assert.match(script, /\$\{canEditMetadata \? `<button class="source-file-add"/);
+});
+
+test("项目详情文件上传显示进度且失败时不生成假记录", async () => {
+  const script = await read("script.js");
+  const projectDetailUpload = script.match(/body\.querySelector\("#pjFileInput"\)\?\.addEventListener\("change", async \(e\) => \{[\s\S]*?\n  \}\);/)?.[0] || "";
+
+  assert.match(projectDetailUpload, /acceptedUploadFiles\(input\?\.files,[\s\S]*?maxBytes: MAX_RESOURCE_FILE_BYTES/);
+  assert.match(projectDetailUpload, /runPreviewFileUpload\(\{/);
+  assert.match(projectDetailUpload, /saveImageToDB\(key, file, \{ onProgress \}\)/);
+  assert.match(projectDetailUpload, /await saveStudioStateToCloud\(\)/);
+  assert.match(projectDetailUpload, /showToast\(artworkUploadErrorMessage\(error\), "error"\)/);
+  assert.doesNotMatch(projectDetailUpload, /catch\s*\{\s*\}/);
 });
 
 test("客户、员工、订单、作品及评审关系都进入云端状态模块", async () => {
@@ -635,6 +666,7 @@ test("新建项目遵循原型并校验名称、时间和负责人", async () =>
   assert.match(script, /if \(!data\.deadline\) invalid\.push\(\["deadline"/);
   assert.match(script, /if \(!data\.owner\) invalid\.push\(\["owner"/);
   assert.match(script, /pjOpenForm\(null, draft\)/);
+  assert.match(script, /host\.querySelector\("#pjfFileInput"\)\?\.addEventListener\("change", async \(event\) => \{[\s\S]*?acceptedUploadFiles\(input\?\.files,[\s\S]*?runPreviewFileUpload\(\{[\s\S]*?saveImageToDB\(key, file, \{ onProgress \}\)/);
   assert.match(styles, /\.pjf-file-add\s*\{[\s\S]*?border:\s*1px dashed/);
   assert.match(styles, /\.pjf-person-chip/);
   assert.match(styles, /\[data-pjf-field\]\.has-error/);
@@ -665,6 +697,9 @@ test("设计师总控台使用个人数据、只读排行和独立作品趋势",
   const styles = await read("styles.css");
   assert.match(html, /data-role-dashboard="设计师"[\s\S]*?id="designerDashboard"/);
   assert.match(script, /function renderDesignerDashboard\(role = currentAccount\.role\)/);
+  assert.match(script, /function creativeOwnCards\(role = currentAccount\.role\) \{[\s\S]*?personalWorkCardVisible\(card, role, currentAccount\.ownerKey\)/);
+  assert.match(script, /function personalWorkCardVisible\(card, role, ownerKey\)[\s\S]*?card\.classList\.contains\("deleted"\)[\s\S]*?isPersonallyDeleted\(card, ownerKey\)/);
+  assert.match(script, /if \(isPersonalWorks\) return personalWorkCardVisible\(card, role, ownerKey\)/);
   assert.match(script, /function designerProductionBuckets\(/);
   assert.match(script, /data-designer-range="month"/);
   assert.match(script, /data-designer-range="three"/);
@@ -768,7 +803,7 @@ test("休眠、回收站和人员选择遵循统一状态与保留规则", async
   assert.match(script, /p\.owners = \[owner\]/);
   assert.match(script, /const cards = \[\.\.\.workCards\]\.filter\(\(card\) => !card\.classList\.contains\("deleted"\) && !isSleepingWork\(card\)\)/);
   assert.match(script, /if \(card\.classList\.contains\("deleted"\) \|\| isSleepingWork\(card\)\) return false/);
-  assert.match(script, /return !isPersonalWorks \|\| personalWorkCardMatches\(card, role, ownerKey\)/);
+  assert.match(script, /if \(isPersonalWorks\) return personalWorkCardVisible\(card, role, ownerKey\)/);
   assert.match(styles, /\.personal-review-status\s*\{[\s\S]*?right:\s*10px;[\s\S]*?left:\s*auto/);
 });
 
@@ -1084,15 +1119,15 @@ test("稿件删除遵循订单交付状态并保留订单历史", async () => {
   assert.match(script, /此操作只会解除该稿件与当前订单的关系并重新计算金额，不会删除作品库原稿/);
   assert.match(script, /worksBoard\?\.classList\.toggle\("sales-readonly-library", role === "销售"\)/);
   assert.match(styles, /\.works-board\.sales-readonly-library \.work-card > \.work-trash-button/);
-  assert.match(html, /data-view="sleep" data-roles="管理员,设计师"/);
-  assert.match(html, /data-view="recycle" data-roles="管理员,设计师"/);
-  assert.doesNotMatch(html, /data-view="(?:sleep|recycle)" data-roles="[^"]*手绘师/);
+  assert.match(html, /data-view="sleep" data-roles="管理员"/);
+  assert.match(html, /data-view="recycle" data-roles="管理员"/);
+  assert.doesNotMatch(html, /data-view="(?:sleep|recycle)" data-roles="[^"]*(?:设计师|手绘师)/);
   assert.match(script, /if \(currentAccount\.role === "设计师"\) \{[\s\S]*?setPersonalArchiveState\(card, "delete", true\)/);
   assert.match(script, /function markWorkDeletedGlobally\(card/);
   assert.match(script, /currentAccount\.role === "手绘师"[\s\S]*?删除后将立即从“我的稿件”移除/);
   assert.match(script, /libraryManageSleep\?\.classList\.toggle\("hidden", !libraryManageMode \|\| currentAccount\.role === "手绘师"\)/);
-  const worksView = script.match(/function configureWorksView\([^)]*\) \{[\s\S]*?function personalWorkCardMatches/)?.[0] || "";
-  assert.ok(worksView.indexOf('card.classList.contains("deleted")') < worksView.indexOf("isPersonalWorks && isCreatorRole(role)"));
+  const personalVisibility = script.match(/function personalWorkCardVisible\([^)]*\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.ok(personalVisibility.indexOf('card.classList.contains("deleted")') < personalVisibility.indexOf("isPersonallyDeleted(card, ownerKey)"));
 });
 
 test("管理员待评审稿件在侧栏标题旁显示状态红点", async () => {
