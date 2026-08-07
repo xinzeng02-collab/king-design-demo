@@ -6923,9 +6923,10 @@ function configureWorksView(role, ownerKey, mode = activeWorksMode) {
   worksBoard?.classList.toggle("sales-readonly-library", role === "销售");
 
   const nextScope = new Set([...workCards].filter((card) => {
+    if (card.classList.contains("deleted") || isSleepingWork(card)) return false;
     if (isPersonalWorks && isCreatorRole(role)) {
       if (isPersonallyDeleted(card, ownerKey) || isPersonallySleeping(card, ownerKey)) return false;
-    } else if (card.classList.contains("deleted") || isSleepingWork(card)) return false;
+    }
     if (isSharedLibrary && !isApprovedSharedWork(card)) return false;
     return !isPersonalWorks || personalWorkCardMatches(card, role, ownerKey);
   }));

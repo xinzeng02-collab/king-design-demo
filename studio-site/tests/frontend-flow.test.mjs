@@ -284,7 +284,7 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-production-sync-v11/);
+  assert.match(html, /script\.js\?v=20260807-production-sync-v12/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
@@ -1017,6 +1017,8 @@ test("稿件删除遵循订单交付状态并保留订单历史", async () => {
   assert.match(script, /function markWorkDeletedGlobally\(card/);
   assert.match(script, /currentAccount\.role === "手绘师"[\s\S]*?删除后将立即从“我的稿件”移除/);
   assert.match(script, /libraryManageSleep\?\.classList\.toggle\("hidden", !libraryManageMode \|\| currentAccount\.role === "手绘师"\)/);
+  const worksView = script.match(/function configureWorksView\([^)]*\) \{[\s\S]*?function personalWorkCardMatches/)?.[0] || "";
+  assert.ok(worksView.indexOf('card.classList.contains("deleted")') < worksView.indexOf("isPersonalWorks && isCreatorRole(role)"));
 });
 
 test("管理员待评审稿件在侧栏标题旁显示状态红点", async () => {
