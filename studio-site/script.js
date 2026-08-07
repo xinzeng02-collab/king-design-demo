@@ -8100,6 +8100,14 @@ function libraryEligibleDesigns() {
   });
 }
 
+function selectedCartFiles() {
+  const files = new Set(libraryCart);
+  (selectionCarts || []).forEach((entry) => {
+    (entry.files || []).forEach((file) => files.add(file));
+  });
+  return files;
+}
+
 function viewerLibraryModeActive() {
   return document.querySelector("#customerSelectionFlow")?.classList.contains("viewer-mode") || false;
 }
@@ -8670,6 +8678,7 @@ function addLibraryCart(file) {
     topCartButton?.classList.add("cart-bump");
     if (viewerLibraryModeActive()) renderLibraryGrid();
   }
+  syncVlibGalleryAfterCartChange(file);
   showToast(`${file} 已加入选稿车。`, "success");
 }
 
@@ -11990,10 +11999,13 @@ function renderViewerLibrarySelectedConditions() {
 }
 
 function filteredViewerLibraryDesigns() {
-  const cards = libraryEligibleDesigns().filter((card) => viewerLibraryFilterConfig.every((row) => {
-    const selected = viewerLibraryFilterState[row.key];
-    return !selected.size || cardLibraryValues(card, row.key).some((value) => selected.has(value));
-  }));
+  const selectedFiles = selectedCartFiles();
+  const cards = libraryEligibleDesigns().filter((card) =>
+    !selectedFiles.has(card.dataset.file) && viewerLibraryFilterConfig.every((row) => {
+      const selected = viewerLibraryFilterState[row.key];
+      return !selected.size || cardLibraryValues(card, row.key).some((value) => selected.has(value));
+    })
+  );
   const mode = viewerLibrarySort?.value || "version-desc";
   return cards.sort((a, b) => {
     if (mode === "version-asc") return new Date(a.dataset.version) - new Date(b.dataset.version);
@@ -16334,8 +16346,11 @@ orderList.addEventListener("change", (event) => {
 libraryCartList.addEventListener("click", (event) => {
   const remove = event.target.closest("[data-cart-remove]");
   if (remove) {
-    libraryCart.delete(remove.dataset.cartRemove);
+    const file = remove.dataset.cartRemove;
+    libraryCart.delete(file);
     renderLibraryCart();
+    if (viewerLibraryModeActive()) renderLibraryGrid();
+    syncVlibGalleryAfterCartChange(file);
     return;
   }
   const item = event.target.closest(".cart-item");
@@ -18321,8 +18336,11 @@ function vlibEnsureState() {
 function vlibFilteredCards() {
   const state = vlibEnsureState();
   const soldFiles = soldPatternFiles();
+  const selectedFiles = selectedCartFiles();
   let cards = approvedLibraryCards().filter((card) =>
-    !soldFiles.has(card.dataset.file) && libraryFilterConfig.every((row) => {
+    !soldFiles.has(card.dataset.file)
+    && (vlibSelectedOnly ? libraryCart.has(card.dataset.file) : !selectedFiles.has(card.dataset.file))
+    && libraryFilterConfig.every((row) => {
       const sel = state[row.key];
       if (!sel.size) return true;
       return cardLibraryValues(card, row.key).some((v) => sel.has(v));
@@ -18334,7 +18352,6 @@ function vlibFilteredCards() {
       return searchMatches(vlibSearchText, [card.dataset.file, title, card.dataset.tags]);
     });
   }
-  if (vlibSelectedOnly) cards = cards.filter((c) => libraryCart.has(c.dataset.file));
   return cards;
 }
 function renderVlibFilters() {
@@ -18396,17 +18413,20 @@ function vlibCardHtml(card, lockedBySales) {
   </div>`;
 }
 
-function syncVlibGallerySelection(grid) {
-  const check = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  grid.querySelectorAll(".vlib-card").forEach((tile) => {
-    const picked = libraryCart.has(tile.dataset.vlibWork);
-    tile.classList.toggle("picked", picked);
-    const add = tile.querySelector("[data-vlib-add]");
-    if (!add) return;
-    add.classList.toggle("added", picked);
-    add.innerHTML = picked ? check : "+";
-    add.setAttribute("aria-label", picked ? "已选，点击取消" : "加入选稿");
-  });
+function syncVlibGalleryAfterCartChange(file) {
+  const grid = document.querySelector("#vlibGallery");
+  const overlay = document.querySelector("#viewerLibrary");
+  if (!grid || !overlay?.classList.contains("active")) return;
+  const hidden = vlibSelectedOnly ? !libraryCart.has(file) : selectedCartFiles().has(file);
+  if (!hidden) {
+    renderVlibGallery(true);
+    return;
+  }
+  vlibVisibleCards = vlibVisibleCards.filter((card) => card.dataset.file !== file);
+  [...grid.querySelectorAll("[data-vlib-work]")]
+    .find((card) => card.dataset.vlibWork === file)
+    ?.remove();
+  renderVlibGallery();
 }
 
 function renderVlibGallery(reset = false) {
@@ -18840,15 +18860,8 @@ function saveViewerNewClient(startAfter) {
       const file = add.dataset.vlibAdd;
       const picked = !libraryCart.has(file);
       if (picked) libraryCart.add(file); else libraryCart.delete(file);
-      // 只更新被点击的这一张卡（不再整库重绘，避免上百张图重新解码造成卡顿）
-      const check = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      add.classList.toggle("added", picked);
-      add.innerHTML = picked ? check : "+";
-      add.setAttribute("aria-label", picked ? "已选，点击取消" : "加入选稿");
-      add.closest(".vlib-card")?.classList.toggle("picked", picked);
-      if (vlibSelectedOnly && !picked) add.closest(".vlib-card")?.remove(); // 仅看已选时移除
-      // 花型库覆盖层下方的完整选稿车无需在每次勾选时重绘。
       syncVlibSelectionSummary();
+      syncVlibGalleryAfterCartChange(file);
       return;
     }
     const work = e.target.closest("[data-vlib-work]");
@@ -18958,9 +18971,10 @@ function saveViewerNewClient(startAfter) {
   document.querySelector("#vlibSelectedPop")?.addEventListener("click", (e) => {
     const rm = e.target.closest("[data-vlib-unpick]");
     if (rm) {
-      libraryCart.delete(rm.dataset.vlibUnpick);
+      const file = rm.dataset.vlibUnpick;
+      libraryCart.delete(file);
       syncVlibSelectionSummary();
-      renderVlibGallery(true);
+      syncVlibGalleryAfterCartChange(file);
       renderVlibSelectedPop();
     }
   });
@@ -18979,7 +18993,7 @@ function saveViewerNewClient(startAfter) {
       libraryCart.delete(file);
       vlibCompareFiles.delete(file);
       syncVlibSelectionSummary();
-      syncVlibGallerySelection(document.querySelector("#vlibGallery"));
+      syncVlibGalleryAfterCartChange(file);
       if (!vlibCompareFiles.size) closeVlibCompare();
       return;
     }
@@ -19009,7 +19023,7 @@ function saveViewerNewClient(startAfter) {
       const file = confirm.dataset.vlibCompareConfirm;
       if (libraryCart.has(file)) libraryCart.delete(file); else libraryCart.add(file);
       syncVlibSelectionSummary();
-      syncVlibGallerySelection(document.querySelector("#vlibGallery"));
+      syncVlibGalleryAfterCartChange(file);
       return;
     }
     const preview = event.target.closest("[data-vlib-compare-preview]");
@@ -19072,9 +19086,7 @@ const expandedSelectionCartIds = new Set();
 
 // 右上角选稿车：已提交（各客户选稿车）+ 本次进行中，合并去重
 function allSelectedFiles() {
-  const set = new Set([...libraryCart]);
-  (selectionCarts || []).forEach((c) => (c.files || []).forEach((f) => set.add(f)));
-  return [...set];
+  return [...selectedCartFiles()];
 }
 function customerCartContextFiles(file) {
   const activeCustomerKey = viewerSession?.customerId || viewerSession?.companyName;
@@ -19715,6 +19727,8 @@ function openCustomerPatternViewer(file, options = {}) {
     if (libraryCart.has(file)) {
       libraryCart.delete(file);
       renderLibraryCart();
+      if (viewerLibraryModeActive()) renderLibraryGrid();
+      syncVlibGalleryAfterCartChange(file);
       button.textContent = "加入选稿车";
       button.classList.remove("selected");
       showToast(`${file} 已移出选稿车。`, "success");

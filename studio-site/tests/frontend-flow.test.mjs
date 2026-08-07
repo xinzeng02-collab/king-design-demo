@@ -185,6 +185,48 @@ test("共享作品库和手绘关联只接收审核通过且未归档的稿件",
   assert.equal(isApproved(card("approved", "已通过", { sleeping: true })), false);
 });
 
+test("客户看稿花型库排除选稿车稿件且已选视图保留本次稿件", async () => {
+  const script = await read("script.js");
+  const selectedSource = script.match(/function selectedCartFiles\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const filterSource = script.match(/function vlibFilteredCards\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const legacyFilter = script.match(/function filteredViewerLibraryDesigns\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const syncSource = script.match(/function syncVlibGalleryAfterCartChange\(file\) \{[\s\S]*?\n\}/)?.[0] || "";
+
+  const currentCart = new Set(["current.jpg"]);
+  const submittedCarts = [{ files: ["submitted.jpg"] }];
+  const selectedCartFiles = new Function("libraryCart", "selectionCarts", `${selectedSource}; return selectedCartFiles;`)(currentCart, submittedCarts);
+  assert.deepEqual([...selectedCartFiles()].sort(), ["current.jpg", "submitted.jpg"]);
+
+  const cards = ["current.jpg", "submitted.jpg", "available.jpg"].map((file) => ({
+    dataset: { file, tags: "" },
+    querySelector: () => ({ textContent: file }),
+  }));
+  const makeFilter = (selectedOnly) => new Function(
+    "approvedLibraryCards", "soldPatternFiles", "selectedCartFiles", "libraryCart",
+    "libraryFilterConfig", "vlibEnsureState", "cardLibraryValues", "vlibSearchText",
+    "searchMatches", "vlibSelectedOnly",
+    `${filterSource}; return vlibFilteredCards;`,
+  )(
+    () => cards,
+    () => new Set(),
+    selectedCartFiles,
+    currentCart,
+    [],
+    () => ({}),
+    () => [],
+    "",
+    () => true,
+    selectedOnly,
+  );
+
+  assert.deepEqual(makeFilter(false)().map((card) => card.dataset.file), ["available.jpg"]);
+  assert.deepEqual(makeFilter(true)().map((card) => card.dataset.file), ["current.jpg"]);
+  assert.match(legacyFilter, /!selectedFiles\.has\(card\.dataset\.file\)/);
+  assert.match(syncSource, /vlibVisibleCards = vlibVisibleCards\.filter/);
+  assert.match(syncSource, /renderVlibGallery\(true\)/);
+  assert.match(syncSource, /renderVlibGallery\(\)/);
+});
+
 test("品牌入口暂时隐藏客户看稿但保留完整客户能力", async () => {
   const html = await read("index.html");
   const loginStyles = await read("login-experience.css");
@@ -284,7 +326,7 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-production-sync-v13/);
+  assert.match(html, /script\.js\?v=20260807-production-sync-v14/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
