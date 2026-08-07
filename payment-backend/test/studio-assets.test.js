@@ -55,3 +55,26 @@ test("签名上传地址会编码中文和空格文件名", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("Supabase 永久删除使用 Storage 批量前缀协议", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured = null;
+  globalThis.fetch = async (url, options) => {
+    captured = { url, options };
+    return new Response(null, { status: 200 });
+  };
+  try {
+    await assets.deleteStudioAsset({
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-key",
+    }, actor, "work_1__original");
+    assert.equal(captured.url, "https://example.supabase.co/storage/v1/object/studio-assets");
+    assert.equal(captured.options.method, "DELETE");
+    assert.equal(captured.options.headers["content-type"], "application/json");
+    assert.deepEqual(JSON.parse(captured.options.body), {
+      prefixes: ["studio/org-a/work_1__original"],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

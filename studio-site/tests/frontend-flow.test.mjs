@@ -152,12 +152,37 @@ test("完整选稿车页面点击图片使用作品库标准预览", async () =>
   assert.match(html, /script\.js\?v=/);
 });
 
-test("设计稿只能关联已经完成评审的手绘稿", async () => {
+test("共享作品库和手绘关联只接收审核通过且未归档的稿件", async () => {
   const script = await read("script.js");
   const catalog = script.match(/function painterWorkCatalog\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const sharedApproval = script.match(/function isApprovedSharedWork\(card\) \{[\s\S]*?\n\}/)?.[0] || "";
+  const worksView = script.match(/function configureWorksView\([^)]*\) \{[\s\S]*?function personalWorkCardMatches/)?.[0] || "";
 
   assert.match(catalog, /card\.dataset\.workRole === "手绘师"/);
-  assert.match(catalog, /!isReviewPending\(card\)/);
+  assert.match(catalog, /isApprovedSharedWork\(card\)/);
+  assert.match(sharedApproval, /reviewState === "approved"/);
+  assert.match(sharedApproval, /card\.classList\.contains\("deleted"\)/);
+  assert.match(sharedApproval, /isSleepingWork\(card\)/);
+  assert.match(sharedApproval, /\["已通过", "已出售", "交付中", "完结"\]/);
+  assert.match(worksView, /isSharedLibrary && !isApprovedSharedWork\(card\)/);
+  assert.match(script.match(/function approvedLibraryCards\(\) \{[\s\S]*?\n\}/)?.[0] || "", /filter\(isApprovedSharedWork\)/);
+
+  const isApproved = new Function("reviewLogs", "isSleepingWork", "cardStatusSummary", `${sharedApproval}; return isApprovedSharedWork;`)(
+    (card) => card.logs || [],
+    (card) => Boolean(card.sleeping),
+    (card) => card.summary || "",
+  );
+  const card = (reviewState, summary = "", options = {}) => ({
+    dataset: { reviewState, reviewAction: options.reviewAction || "" },
+    classList: { contains: (name) => name === "deleted" && Boolean(options.deleted) },
+    summary,
+    sleeping: Boolean(options.sleeping),
+  });
+  assert.equal(isApproved(card("pending")), false);
+  assert.equal(isApproved(card("revision", "需修改")), false);
+  assert.equal(isApproved(card("approved")), true);
+  assert.equal(isApproved(card("pending", "销售状态：已出售")), true);
+  assert.equal(isApproved(card("approved", "已通过", { sleeping: true })), false);
 });
 
 test("品牌入口暂时隐藏客户看稿但保留完整客户能力", async () => {
@@ -234,7 +259,8 @@ test("上传使用 Blob 存储，并保留源文件缺失提示", async () => {
   const script = await read("script.js");
   const styles = await read("styles.css");
   assert.match(script, /KingBlobStore/);
-  assert.match(script, /mapWithConcurrency\(uploadPlans, 3/);
+  assert.match(script, /mapWithConcurrency\(uploadPlans, uploadConcurrency/);
+  assert.match(script, /largestUploadBytes >= 30 \* 1024 \* 1024 \? 1/);
   assert.match(script, /saveImageToDB\(originalKey, file, \{ onProgress \}\)/);
   assert.match(script, /saveImageToDB\(plan\.key, plan\.file, \{ onProgress: updateProgress \}\)/);
   assert.match(script, /MAX_IMAGE_FILE_BYTES = 100 \* 1024 \* 1024/);
@@ -258,7 +284,7 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   const html = await read("index.html");
   const script = await read("script.js");
 
-  assert.match(html, /script\.js\?v=20260807-production-sync-v9/);
+  assert.match(html, /script\.js\?v=20260807-production-sync-v11/);
   assert.match(script, /function backendStudioAsset\(key, options = \{\}\)/);
   assert.match(script, /await backendStudioAsset\(key, \{[\s\S]*?action: "sign-upload"/);
   assert.match(script, /request\.open\("PUT", signedUrl\)/);
@@ -267,6 +293,11 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   assert.match(script, /function mergeStudioModule\(module, remoteValue, localValue, previousValue\)/);
   assert.match(script, /valueToSend = mergeStudioModule\(module, backendSyncMeta\(\)\?\.state\?\.\[module\], valueToSend, previousState\?\.\[module\]\)/);
   assert.match(script, /const removedKeys = new Set/);
+  assert.match(script, /const locallyChanged = !previousRecord/);
+  assert.match(script, /async function uploadBackendStudioAssetOnce/);
+  assert.match(script, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/);
+  assert.match(script, /request\.timeout = 600000/);
+  assert.match(script, /function normalizeStudioAssetBaseKey/);
   assert.match(script, /backendLastSyncAttempt = backendSyncQueue\.then\(syncWithRetry\)/);
   assert.match(script, /await saveStudioStateToCloud\(\)/);
   assert.match(script, /logoutButton\.addEventListener\("click", async[\s\S]*?await backendLastSyncAttempt/);
@@ -274,6 +305,16 @@ test("云端协作的作品文件与状态冲突具备明确处理路径", async
   assert.match(script, /function deprovisionBackendEmployeeAccount/);
   assert.match(script, /action=deprovision-employee/);
   assert.match(script, /await deprovisionBackendEmployeeAccount\(\{ username: member\.ownerKey \}\)/);
+
+  const mergeHelpers = script.match(/function studioRecordIdentity\(record\)[\s\S]*?async function pushBackendStudioModules/)?.[0]
+    .replace(/async function pushBackendStudioModules[\s\S]*$/, "") || "";
+  const mergeModule = new Function("currentAccount", `${mergeHelpers}; return mergeStudioModule;`)({ ownerKey: "painter-a" });
+  const previous = [{ file: "A", reviewState: "pending" }];
+  const local = [{ file: "A", reviewState: "pending" }, { file: "B", reviewState: "pending" }];
+  const remote = [{ file: "A", reviewState: "approved" }];
+  const merged = mergeModule("createdWorks", remote, local, previous);
+  assert.equal(merged.find((item) => item.file === "A")?.reviewState, "approved");
+  assert.equal(merged.find((item) => item.file === "B")?.reviewState, "pending");
 });
 
 test("正式版不泄漏演示设计师身份，成员档案只对管理员开放", async () => {
@@ -954,17 +995,28 @@ test("员工账号弹窗保护编辑过程，并提供详情与密码复制", as
 });
 
 test("稿件删除遵循订单交付状态并保留订单历史", async () => {
+  const html = await read("index.html");
   const script = await read("script.js");
+  const styles = await read("styles.css");
 
   assert.match(script, /function ordersContainingWork\(file\)/);
   assert.match(script, /function undeliveredOrdersForWork\(file\)[\s\S]*?orderDeliverStatus\(order\) !== "已交付"/);
-  assert.match(script, /function ensureWorksCanMoveToRecycle\(cards\)/);
+  assert.match(script, /function ensureWorksCanMoveToRecycle\(cards\)[\s\S]*?title: "稿件暂时不能删除"[\s\S]*?singleAction: true/);
   assert.match(script, /async function deleteWorkCard\(card\)[\s\S]*?ensureWorksCanMoveToRecycle\(\[card\]\)/);
   assert.match(script, /libraryManageDelete\?\.addEventListener[\s\S]*?ensureWorksCanMoveToRecycle\(cards\)/);
   assert.match(script, /#sleepManageDelete[\s\S]*?ensureWorksCanMoveToRecycle\(cards\)/);
   assert.match(script, /function permanentlyRemoveWorkCards\(cards\)[\s\S]*?ordersContainingWork\(file\)\.length/);
   assert.match(script, /title: "警告：从订单移除稿件"/);
   assert.match(script, /此操作只会解除该稿件与当前订单的关系并重新计算金额，不会删除作品库原稿/);
+  assert.match(script, /worksBoard\?\.classList\.toggle\("sales-readonly-library", role === "销售"\)/);
+  assert.match(styles, /\.works-board\.sales-readonly-library \.work-card > \.work-trash-button/);
+  assert.match(html, /data-view="sleep" data-roles="管理员,设计师"/);
+  assert.match(html, /data-view="recycle" data-roles="管理员,设计师"/);
+  assert.doesNotMatch(html, /data-view="(?:sleep|recycle)" data-roles="[^"]*手绘师/);
+  assert.match(script, /if \(currentAccount\.role === "设计师"\) \{[\s\S]*?setPersonalArchiveState\(card, "delete", true\)/);
+  assert.match(script, /function markWorkDeletedGlobally\(card/);
+  assert.match(script, /currentAccount\.role === "手绘师"[\s\S]*?删除后将立即从“我的稿件”移除/);
+  assert.match(script, /libraryManageSleep\?\.classList\.toggle\("hidden", !libraryManageMode \|\| currentAccount\.role === "手绘师"\)/);
 });
 
 test("管理员待评审稿件在侧栏标题旁显示状态红点", async () => {

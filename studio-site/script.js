@@ -2502,14 +2502,14 @@ async function deprovisionBackendEmployeeAccount({ username }) {
   });
 }
 
-async function uploadBackendStudioAsset(key, imageData, { onProgress } = {}) {
+async function uploadBackendStudioAssetOnce(key, imageData, { onProgress } = {}) {
   const ticket = await backendStudioAsset(key, { method: "POST", action: "sign-upload", headers: { "content-type": "application/json" } });
   const { signedUrl } = await ticket.json();
   if (!signedUrl) throw Object.assign(new Error("STUDIO_ASSET_SIGN_FAILED"), { code: "STUDIO_ASSET_SIGN_FAILED" });
   await new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("PUT", signedUrl);
-    request.timeout = 180000;
+    request.timeout = 600000;
     request.setRequestHeader("x-upsert", "true");
     request.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
@@ -2517,13 +2517,16 @@ async function uploadBackendStudioAsset(key, imageData, { onProgress } = {}) {
       if (typeof onProgress === "function") onProgress(event.loaded, event.total);
       else if (appLoadingText) appLoadingText.textContent = `正在上传 ${imageData?.name || "图片"}（${percent}%）`;
     };
-    request.onload = () => request.status >= 200 && request.status < 300
-      ? resolve()
-      : reject(Object.assign(new Error("STUDIO_ASSET_UPLOAD_FAILED"), {
-        code: "STUDIO_ASSET_UPLOAD_FAILED",
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) return resolve();
+      let detail = {};
+      try { detail = JSON.parse(request.responseText || "{}"); } catch {}
+      reject(Object.assign(new Error(detail.message || detail.error || "STUDIO_ASSET_UPLOAD_FAILED"), {
+        code: detail.error || "STUDIO_ASSET_UPLOAD_FAILED",
         status: request.status,
         detail: request.responseText || "",
       }));
+    };
     request.onerror = () => reject(Object.assign(new Error("STUDIO_ASSET_UPLOAD_FAILED"), { code: "STUDIO_ASSET_UPLOAD_FAILED" }));
     request.ontimeout = () => reject(Object.assign(new Error("STUDIO_ASSET_UPLOAD_TIMEOUT"), { code: "STUDIO_ASSET_UPLOAD_TIMEOUT" }));
     // Supabase signed uploads accept Blob/File payloads as multipart form data.
@@ -2533,6 +2536,25 @@ async function uploadBackendStudioAsset(key, imageData, { onProgress } = {}) {
     body.append("", imageData);
     request.send(body);
   });
+}
+
+async function uploadBackendStudioAsset(key, imageData, options = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await uploadBackendStudioAssetOnce(key, imageData, options);
+      return;
+    } catch (error) {
+      lastError = error;
+      const status = Number(error?.status || 0);
+      const code = String(error?.code || error?.message || "");
+      const retryable = !status || status === 408 || status === 429 || status >= 500
+        || /TIMEOUT|REQUEST_FAILED|UPLOAD_FAILED|SIGN_FAILED/.test(code);
+      if (!retryable || attempt === 3) break;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 600));
+    }
+  }
+  throw lastError;
 }
 
 async function deleteBackendStudioAsset(key) {
@@ -2720,10 +2742,11 @@ function mergeStudioModule(module, remoteValue, localValue, previousValue) {
   // 冲突合并必须同时保留“新增/修改”和“删除”差异，否则远端旧记录会在
   // 永久删除后被重新并回数组，造成回收站看似清空但刷新后复活。
   if (Array.isArray(remoteValue) && Array.isArray(localValue)) {
+    const previousRecords = new Map((Array.isArray(previousValue) ? previousValue : [])
+      .map((record) => [studioRecordIdentity(record), record])
+      .filter(([key]) => Boolean(key)));
     const localKeys = new Set(localValue.map(studioRecordIdentity).filter(Boolean));
-    const removedKeys = new Set((Array.isArray(previousValue) ? previousValue : [])
-      .map(studioRecordIdentity)
-      .filter((key) => key && !localKeys.has(key)));
+    const removedKeys = new Set([...previousRecords.keys()].filter((key) => !localKeys.has(key)));
     const merged = new Map();
     remoteValue.forEach((record) => {
       const key = studioRecordIdentity(record);
@@ -2731,7 +2754,10 @@ function mergeStudioModule(module, remoteValue, localValue, previousValue) {
     });
     localValue.forEach((record) => {
       const key = studioRecordIdentity(record);
-      if (key) merged.set(key, record);
+      if (!key) return;
+      const previousRecord = previousRecords.get(key);
+      const locallyChanged = !previousRecord || JSON.stringify(previousRecord) !== JSON.stringify(record);
+      if (locallyChanged || !merged.has(key)) merged.set(key, record);
     });
     return [...merged.values()];
   }
@@ -4143,6 +4169,26 @@ function createUploadProgressTracker(plans) {
   };
 }
 
+function artworkUploadErrorMessage(error) {
+  const status = Number(error?.status || 0);
+  const code = String(error?.code || error?.message || "");
+  const fileName = error?.uploadFileName ? `「${error.uploadFileName}」` : "该文件";
+  if (status === 413 || /ASSET_TOO_LARGE|too large|maximum allowed size/i.test(code)) {
+    return `${fileName}超过云端单文件上限 100MB，请确认文件大小后重试。`;
+  }
+  if (/TIMEOUT/.test(code)) return `${fileName}上传超时。系统已自动重试 3 次，请保持网络稳定后再次上传。`;
+  if (status === 401 || /UNAUTHENTICATED/.test(code)) return "登录状态已过期，请重新登录后继续上传。";
+  if (status === 403 || /FORBIDDEN/.test(code)) return "当前账号没有上传该文件的权限，请联系管理员检查员工岗位。";
+  if (status === 400 || /INVALID_ASSET_KEY/.test(code)) return `${fileName}的文件名或格式无法上传，请缩短文件名后重试。`;
+  if (/STUDIO_STATE|BACKEND_REQUEST|revision/i.test(code)) return "图片已上传，但稿件资料同步失败；请保持页面并重试，系统不会压缩原图。";
+  if (/NAS_|EACCES|EPERM|ENOENT|network|access|quota|存储|写入|UPLOAD|STORAGE/i.test(code)) {
+    return RELEASE_CONFIG.useBackendAuth
+      ? `${fileName}云端上传失败，系统已自动重试 3 次；请检查网络后重试。`
+      : "NAS 文件写入失败，请检查连接与 files 文件夹权限。";
+  }
+  return `图片处理失败${code ? `：${code}` : "，请重新选择图片再试。"}`;
+}
+
 async function createImageVariantBlob(file, maxSize, square = false, quality = 0.84) {
   const bitmap = await createImageBitmap(file);
   try {
@@ -4178,9 +4224,24 @@ async function createImageVariantBlob(file, maxSize, square = false, quality = 0
   }
 }
 
+function normalizeStudioAssetBaseKey(value, maxLength = 210) {
+  const clean = String(value || "asset")
+    .replace(/[\\/\u0000-\u001f\u007f]/g, "-")
+    .trim() || "asset";
+  if (clean.length <= maxLength) return clean;
+  let hash = 2166136261;
+  for (let index = 0; index < clean.length; index += 1) {
+    hash ^= clean.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const suffix = (hash >>> 0).toString(36).padStart(7, "0");
+  return `${clean.slice(0, Math.max(1, maxLength - suffix.length - 1))}-${suffix}`;
+}
+
 async function persistArtworkImageTiers(baseKey, file, { onProgress } = {}) {
-  const originalKey = `${baseKey}__original`;
-  const thumbKey = `${baseKey}__thumb`;
+  const storageBaseKey = normalizeStudioAssetBaseKey(baseKey);
+  const originalKey = `${storageBaseKey}__original`;
+  const thumbKey = `${storageBaseKey}__thumb`;
   // 原图始终按 File 原字节上传；缩略图只服务列表，详情与下载不使用它。
   const originalUpload = saveImageToDB(originalKey, file, { onProgress });
   try {
@@ -6624,7 +6685,7 @@ function renderLibraryManageState() {
   }
   libraryManageSelectAll?.classList.toggle("hidden", !libraryManageMode);
   libraryManageDelete?.classList.toggle("hidden", !libraryManageMode);
-  libraryManageSleep?.classList.toggle("hidden", !libraryManageMode);
+  libraryManageSleep?.classList.toggle("hidden", !libraryManageMode || currentAccount.role === "手绘师");
   if (libraryManageSelectAll) {
     libraryManageSelectAll.textContent = libraryManageEligibleCount > 0 && selectedCount === libraryManageEligibleCount ? "取消全选" : "全选";
   }
@@ -6815,8 +6876,8 @@ function configureRoleNavigation(role) {
   document.querySelector("#pjNew")?.classList.toggle("hidden", !canCreateProject());
   document.querySelector("#pjOpenDrafts")?.classList.toggle("hidden", !canCreateProject());
   syncResourceLibraryPermissions();
-  document.querySelector(".sleep-manage-actions")?.classList.toggle("hidden", role === "销售");
-  if (role === "销售") {
+  document.querySelector(".sleep-manage-actions")?.classList.toggle("hidden", ["销售", "手绘师"].includes(role));
+  if (["销售", "手绘师"].includes(role)) {
     sleepManageMode = false;
     sleepManageSelection.clear();
   }
@@ -6859,11 +6920,13 @@ function configureWorksView(role, ownerKey, mode = activeWorksMode) {
   // 作品库是管理入口；个人稿件对管理员、设计师和手绘师使用同一套界面。
   worksBoard?.classList.toggle("library-gallery", isSharedLibrary);
   worksBoard?.classList.toggle("personal-review-gallery", isPersonalWorks);
+  worksBoard?.classList.toggle("sales-readonly-library", role === "销售");
 
   const nextScope = new Set([...workCards].filter((card) => {
     if (isPersonalWorks && isCreatorRole(role)) {
       if (isPersonallyDeleted(card, ownerKey) || isPersonallySleeping(card, ownerKey)) return false;
     } else if (card.classList.contains("deleted") || isSleepingWork(card)) return false;
+    if (isSharedLibrary && !isApprovedSharedWork(card)) return false;
     return !isPersonalWorks || personalWorkCardMatches(card, role, ownerKey);
   }));
 
@@ -7138,7 +7201,7 @@ function workRoleName(card) {
 
 function painterWorkCatalog() {
   return [...workCards]
-    .filter((card) => card.dataset.workRole === "手绘师" && !card.classList.contains("deleted") && !isReviewPending(card))
+    .filter((card) => card.dataset.workRole === "手绘师" && isApprovedSharedWork(card))
     .map((card) => {
       const trigger = card.querySelector(".preview-trigger");
       const pattern = [...(trigger?.classList || [])].find((className) => /^pattern-/.test(className)) || "";
@@ -8331,9 +8394,7 @@ function setCustomerPinned(ids, pinned) {
 }
 
 function approvedLibraryCards() {
-  return [...workCards].filter((card) =>
-    !card.classList.contains("deleted") && fieldValue(card, "审核状态").includes("已通过")
-  );
+  return [...workCards].filter(isApprovedSharedWork);
 }
 
 function customerRecentWorks(client, count) {
@@ -8997,10 +9058,13 @@ function ensureWorksCanMoveToRecycle(cards) {
   if (!blocked.length) return true;
   const orderIds = [...new Set(blocked.flatMap((item) => item.orders.map((order) => order.id)))];
   const files = blocked.map((item) => item.file).filter(Boolean);
-  showToast(
-    `${files.length === 1 ? `稿件 ${files[0]}` : `${files.length} 件所选稿件`}仍关联未交付订单 ${orderIds.join("、")}，订单交付后才可删除。`,
-    "warning",
-  );
+  openExitConfirmation({
+    title: "稿件暂时不能删除",
+    message: `${files.length === 1 ? `稿件 ${files[0]}` : `${files.length} 件所选稿件`}仍关联未交付订单 ${orderIds.join("、")}。请先完成订单交付，交付后才能将稿件移入回收站。`,
+    submitText: "知道了",
+    singleAction: true,
+    onConfirm: () => {},
+  });
   return false;
 }
 
@@ -10351,7 +10415,7 @@ async function appendReferenceFiles(card, files) {
   if (!card || !imageFiles.length) return;
   const keys = getReferenceKeys(card);
   for (let index = 0; index < imageFiles.length; index += 1) {
-    const key = `${card.dataset.file}__reference_${keys.length + index + 1}_${Date.now()}`;
+    const key = normalizeStudioAssetBaseKey(`${card.dataset.file}__reference_${keys.length + index + 1}_${Date.now()}`, 230);
     await saveImageToDB(key, imageFiles[index]);
     keys.push(key);
   }
@@ -10399,6 +10463,16 @@ function isReviewPending(card) {
   if (card.dataset.reviewState) return card.dataset.reviewState === "pending" && !isSleepingWork(card);
   const summary = cardStatusSummary(card);
   return !reviewLogs(card).length && !card.dataset.reviewAction && !summary.includes("已通过") && !summary.includes("已出售") && !isSleepingWork(card);
+}
+
+function isApprovedSharedWork(card) {
+  if (!card || card.classList.contains("deleted") || isSleepingWork(card)) return false;
+  const reviewState = String(card.dataset.reviewState || "").trim();
+  if (reviewState === "approved") return true;
+  const reviewAction = String(reviewLogs(card)[0]?.action || card.dataset.reviewAction || "").trim();
+  if (reviewAction) return reviewAction === "通过";
+  const summary = cardStatusSummary(card);
+  return ["已通过", "已出售", "交付中", "完结"].some((status) => summary.includes(status));
 }
 
 function reviewItems() {
@@ -13037,6 +13111,7 @@ function updateCardReviewStatus(card, value) {
 }
 
 async function setWorkSleeping(card, sleeping, { silent = false } = {}) {
+  if (currentAccount.role === "手绘师") return;
   if (isCreatorRole()) {
     if (card.dataset.workOwner !== currentAccount.ownerKey) return;
     if (sleeping) ensureArchivePreviewPersisted(card);
@@ -13104,6 +13179,7 @@ async function setWorkSleeping(card, sleeping, { silent = false } = {}) {
 }
 
 function setWorkSleepingForBatch(card) {
+  if (currentAccount.role === "手绘师") return;
   if (isCreatorRole()) {
     setWorkSleeping(card, true, { silent: true });
     return;
@@ -13149,8 +13225,11 @@ libraryManageDelete?.addEventListener("click", async () => {
   }
   if (!cards.length || !["管理员", "设计师", "手绘师"].includes(currentAccount.role)) return;
   if (!ensureWorksCanMoveToRecycle(cards)) return;
-  if (!window.confirm(`确认删除已选中的 ${cards.length} 件作品吗？删除后会进入回收站。`)) return;
-  if (isCreatorRole()) {
+  const deleteMessage = currentAccount.role === "手绘师"
+    ? `确认删除已选中的 ${cards.length} 件手绘稿吗？删除后将立即从“我的稿件”移除。`
+    : `确认删除已选中的 ${cards.length} 件作品吗？删除后会进入回收站。`;
+  if (!window.confirm(deleteMessage)) return;
+  if (currentAccount.role === "设计师") {
     cards.forEach((card) => setPersonalArchiveState(card, "delete", true));
     libraryManageSelection.clear();
     renderRecycleBin();
@@ -13165,13 +13244,7 @@ libraryManageDelete?.addEventListener("click", async () => {
     return;
   }
   const deletedAt = new Date().toISOString();
-  cards.forEach((card) => {
-    card.classList.add("deleted");
-    card.dataset.deletedAt = deletedAt;
-    markWorkRecordDirty(card);
-    deletedWorks = deletedWorks.filter((item) => item.card.dataset.file !== card.dataset.file);
-    deletedWorks.push({ card, deletedAt });
-  });
+  cards.forEach((card) => markWorkDeletedGlobally(card, deletedAt));
   libraryManageSelection.clear();
   renderRecycleBin();
   renderDailyReviewBoard();
@@ -13185,6 +13258,7 @@ libraryManageDelete?.addEventListener("click", async () => {
 });
 
 libraryManageSleep?.addEventListener("click", async () => {
+  if (currentAccount.role === "手绘师") return;
   const cards = selectedLibraryManageCards();
   if (!cards.length || !window.confirm(`确认将已选中的 ${cards.length} 件作品移入休眠区吗？`)) return;
   cards.forEach(setWorkSleepingForBatch);
@@ -13451,16 +13525,28 @@ async function resubmitSleepingWork(card, mode) {
   }
 }
 
+function markWorkDeletedGlobally(card, deletedAt = new Date().toISOString()) {
+  card.classList.add("deleted");
+  card.dataset.deletedAt = deletedAt;
+  card.dataset.deletedByKey = currentAccount.ownerKey || "";
+  card.dataset.deletedByRole = currentAccount.role || "";
+  markWorkRecordDirty(card);
+  deletedWorks = deletedWorks.filter((item) => item.card.dataset.file !== card.dataset.file);
+  deletedWorks.push({ card, deletedAt });
+}
+
 async function deleteWorkCard(card) {
   const file = card.dataset.file;
   if (isCreatorRole() && card.dataset.workOwner !== currentAccount.ownerKey) return;
   if (!["管理员", "设计师", "手绘师"].includes(currentAccount.role)) return;
   if (!ensureWorksCanMoveToRecycle([card])) return;
-  const confirmed = window.confirm(`确认删除 ${file} 吗？删除后会进入回收站。`);
+  const confirmed = window.confirm(currentAccount.role === "手绘师"
+    ? `确认删除 ${file} 吗？删除后将立即从“我的稿件”移除。`
+    : `确认删除 ${file} 吗？删除后会进入回收站。`);
   if (!confirmed) return;
 
   ensureArchivePreviewPersisted(card);
-  if (isCreatorRole()) {
+  if (currentAccount.role === "设计师") {
     setPersonalArchiveState(card, "delete", true);
     recordActivityNotification({
       type: "work-delete",
@@ -13480,11 +13566,7 @@ async function deleteWorkCard(card) {
     }
     return;
   }
-  card.classList.add("deleted");
-  card.dataset.deletedAt = new Date().toISOString();
-  markWorkRecordDirty(card);
-  deletedWorks = deletedWorks.filter((item) => item.card.dataset.file !== file);
-  deletedWorks.push({ card, deletedAt: card.dataset.deletedAt });
+  markWorkDeletedGlobally(card);
   recordActivityNotification({
     type: "work-delete",
     title: "稿件已移入回收站",
@@ -13498,7 +13580,9 @@ async function deleteWorkCard(card) {
   configureWorksView(roleSelect.value, currentAccount.ownerKey);
   try {
     await saveStudioStateToCloud();
-    showToast(`${file} 已移入回收站，可在回收站中恢复。`, "warning");
+    showToast(currentAccount.role === "手绘师"
+      ? `${file} 已从你的稿件中删除，由管理员统一处理。`
+      : `${file} 已移入回收站，可在回收站中恢复。`, "warning");
   } catch {
     showToast("稿件已在本页移入回收站，但云端同步失败，请保持页面并重试。", "error");
   }
@@ -13928,13 +14012,15 @@ function closeExitConfirmation() {
   lockBodyScroll(formStillOpen);
 }
 
-function openExitConfirmation({ title, message, submitText = "放弃并退出", cancelText = "继续编辑", saveText = "保存并退出", onConfirm, onSave = null }) {
+function openExitConfirmation({ title, message, submitText = "放弃并退出", cancelText = "继续编辑", saveText = "保存并退出", onConfirm, onSave = null, singleAction = false }) {
   pendingExitConfirmation = onConfirm;
   pendingExitSaveAction = onSave;
   exitConfirmTitle.textContent = title || "确认退出";
   exitConfirmMessage.textContent = message || "当前内容尚未保存，退出后本次填写将不会保留。";
   exitConfirmSubmit.textContent = submitText;
   exitConfirmCancel.textContent = cancelText;
+  exitConfirmCancel.classList.toggle("hidden", singleAction);
+  exitConfirmCancel.style.display = singleAction ? "none" : "";
   // With a save action the discard button is secondary and the save button becomes the primary CTA.
   exitConfirmSubmit.classList.toggle("primary-button", !onSave);
   exitConfirmSubmit.classList.toggle("text-dialog-button", Boolean(onSave));
@@ -16308,7 +16394,7 @@ async function appendSourceFiles(card, files) {
   }
   for (let index = 0; index < incoming.length; index += 1) {
     const file = incoming[index];
-    const key = `${card.dataset.file}__source_${existing.length + index + 1}_${Date.now()}`;
+    const key = normalizeStudioAssetBaseKey(`${card.dataset.file}__source_${existing.length + index + 1}_${Date.now()}`, 230);
     await saveImageToDB(key, file);
     existing.push({ name: file.name, key, type: file.type || "application/octet-stream", size: file.size || 0 });
   }
@@ -16892,51 +16978,59 @@ uploadConfirm.addEventListener("click", async () => {
       : "";
     const fileId = editTarget?.dataset.file || `${baseName}${suffix}`;
     const uploadStartedAt = Date.now();
+    const storageFileId = normalizeStudioAssetBaseKey(fileId);
     const uploadPlans = [
       ...files.map((file, imageIndex) => ({
         kind: "work",
         file,
         index: imageIndex,
-        baseKey: file === mainFile ? fileId : `${fileId}__view_${imageIndex + 1}_${uploadStartedAt}`,
+        baseKey: file === mainFile ? storageFileId : `${storageFileId}__view_${imageIndex + 1}_${uploadStartedAt}`,
       })),
       ...selectedPaletteFiles.map((file, paletteIndex) => ({
         kind: "palette",
         file,
         index: paletteIndex,
-        baseKey: `${fileId}__color_${paletteIndex + 2}_${uploadStartedAt}`,
+        baseKey: `${storageFileId}__color_${paletteIndex + 2}_${uploadStartedAt}`,
       })),
       ...selectedReferenceFiles.filter(isImageUploadFile).map((file, refIndex) => ({
         kind: "reference",
         file,
         index: refIndex,
-        key: `${fileId}__reference_${refIndex + 1}_${uploadStartedAt}`,
+        key: normalizeStudioAssetBaseKey(`${storageFileId}__reference_${refIndex + 1}_${uploadStartedAt}`, 230),
       })),
       ...selectedSourceFiles.map((file, sourceIndex) => ({
         kind: "source",
         file,
         index: sourceIndex,
-        key: `${fileId}__source_${sourceIndex + 1}_${uploadStartedAt}`,
+        key: normalizeStudioAssetBaseKey(`${storageFileId}__source_${sourceIndex + 1}_${uploadStartedAt}`, 230),
       })),
     ];
     const uploadProgress = createUploadProgressTracker(uploadPlans);
     showAppLoading(`正在上传 ${uploadPlans.length} 个文件`, { progress: true });
     setAppLoadingProgress(2, `准备上传 · 0/${uploadPlans.length}`);
     await waitForUiPaint();
-    const uploadedFiles = await mapWithConcurrency(uploadPlans, 3, async (plan, planIndex) => {
+    const largestUploadBytes = Math.max(...uploadPlans.map((plan) => Number(plan.file?.size || 0)), 0);
+    const uploadConcurrency = largestUploadBytes >= 30 * 1024 * 1024 ? 1 : largestUploadBytes >= 10 * 1024 * 1024 ? 2 : 3;
+    const uploadedFiles = await mapWithConcurrency(uploadPlans, uploadConcurrency, async (plan, planIndex) => {
       const updateProgress = (loaded, total) => uploadProgress.update(
         planIndex,
         total > 0 ? loaded / total : 0,
         uploadDisplayName(plan.file),
       );
-      let uploaded;
-      if (plan.kind === "work" || plan.kind === "palette") {
-        uploaded = { ...plan, tiers: await persistArtworkImageTiers(plan.baseKey, plan.file, { onProgress: updateProgress }) };
-      } else {
-        await saveImageToDB(plan.key, plan.file, { onProgress: updateProgress });
-        uploaded = plan;
+      try {
+        let uploaded;
+        if (plan.kind === "work" || plan.kind === "palette") {
+          uploaded = { ...plan, tiers: await persistArtworkImageTiers(plan.baseKey, plan.file, { onProgress: updateProgress }) };
+        } else {
+          await saveImageToDB(plan.key, plan.file, { onProgress: updateProgress });
+          uploaded = plan;
+        }
+        uploadProgress.complete(planIndex, uploadDisplayName(plan.file));
+        return uploaded;
+      } catch (error) {
+        if (error && typeof error === "object") error.uploadFileName ||= uploadDisplayName(plan.file);
+        throw error;
       }
-      uploadProgress.complete(planIndex, uploadDisplayName(plan.file));
-      return uploaded;
     });
     setAppLoadingProgress(94, "正在生成预览并整理稿件信息…");
     const workUploads = uploadedFiles.filter((item) => item.kind === "work");
@@ -17061,14 +17155,7 @@ uploadConfirm.addEventListener("click", async () => {
     uploadConfirm.disabled = false;
     // 上传失败时也必须释放全屏弹层，否则它会继续拦截工作台的所有输入。
     closeUploadModal();
-    const errorText = String(error?.message || error || "");
-    const storageFailure = /NAS_|EACCES|EPERM|ENOENT|network|access|quota|存储|写入|UPLOAD|STORAGE/i.test(errorText);
-    const storageMessage = storageFailure
-      ? RELEASE_CONFIG.useBackendAuth
-        ? "云端文件上传失败，请检查网络后重试；已选择的原图不会被压缩。"
-        : "NAS 文件写入失败，请检查连接与 files 文件夹权限。"
-      : `图片处理失败${errorText ? `：${errorText}` : "，请重新选择图片再试。"}`;
-    showToast(storageMessage, "error");
+    showToast(artworkUploadErrorMessage(error), "error");
   } finally {
     // 无论失败发生在压缩、IPC 写入还是状态保存，都必须释放上传弹窗的锁。
     uploadConfirm.disabled = false;

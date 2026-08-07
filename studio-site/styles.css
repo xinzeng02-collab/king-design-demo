@@ -11266,6 +11266,8 @@ body, input, button, select, textarea, h1, h2, h3, h4, p, span, div {
 .works-board.library-gallery .work-card > .work-trash-button,
 .review-work-card > .work-trash-button,
 .sleep-item > .work-trash-button { display: grid; }
+.works-board.sales-readonly-library .work-card > .work-trash-button,
+.works-board.sales-readonly-library .work-card .delete-work { display: none !important; }
 .works-board.library-gallery .work-card:hover > .work-trash-button,
 .works-board.library-gallery .work-card:focus-within > .work-trash-button,
 .review-work-card:hover > .work-trash-button,

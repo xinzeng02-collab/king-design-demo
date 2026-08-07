@@ -55,7 +55,11 @@ function supabaseStorageBucket(env) {
       return { body: response.body, httpMetadata: { contentType: response.headers.get("content-type") || "application/octet-stream" } };
     },
     async delete(key) {
-      const response = await fetch(`${base}/${encodeURI(key)}`, { method: "DELETE", headers: headers() });
+      const response = await fetch(base, {
+        method: "DELETE",
+        headers: headers({ "content-type": "application/json" }),
+        body: JSON.stringify({ prefixes: [key] }),
+      });
       if (!response.ok && response.status !== 404) throw fail(`SUPABASE_STORAGE_${response.status}`, 502);
     },
   };
